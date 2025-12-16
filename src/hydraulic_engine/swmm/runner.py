@@ -1,0 +1,351 @@
+"""
+This file is part of Hydraulic Engine
+The program is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version.
+"""
+# -*- coding: utf-8 -*-
+import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Callable
+from ..utils.enums import RunStatus, ExportDataSource
+from .rpt_handler import SwmmRptHandler
+from .out_handler import SwmmOutHandler
+
+from ..utils import tools_log
+
+
+@dataclass
+class SwmmRunResult:
+    """Result of a SWMM simulation run"""
+    status: RunStatus = RunStatus.NOT_RUN
+    inp_path: Optional[str] = None
+    rpt_path: Optional[str] = None
+    out_path: Optional[str] = None
+    return_code: Optional[int] = None
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    duration_seconds: Optional[float] = None
+    # Simulation statistics
+    routing_steps: Optional[int] = None
+    flow_routing_error: Optional[float] = None
+    runoff_error: Optional[float] = None
+
+
+class SwmmRunner:
+    """
+    Class for running SWMM simulations using pyswmm.
+    
+    pyswmm provides direct access to the SWMM5 computational engine,
+    allowing for real-time interaction and progress tracking during simulations.
+    
+    Example usage:
+        runner = SwmmRunner()
+        result = runner.run("model.inp")
+        
+        # Or with custom output paths
+        result = runner.run(
+            inp_path="model.inp",
+            rpt_path="results.rpt",
+            out_path="results.out"
+        )
+        
+        # With progress callback
+        def on_progress(progress, message):
+            print(f"[{progress}%] {message}")
+        
+        runner.set_progress_callback(on_progress)
+        result = runner.run("model.inp")
+    """
+
+    def __init__(self,
+                inp_path: Optional[str] = None,
+                rpt_path: Optional[str] = None,
+                out_path: Optional[str] = None,
+                progress_callback: Optional[Callable[[int, str], None]] = None):
+        """Initialize SWMM runner."""
+        self.inp_path = inp_path
+        self.rpt_path = rpt_path
+        self.out_path = out_path
+        self.result: Optional[SwmmRunResult] = None
+        self._progress_callback = progress_callback
+
+    def _report_progress(self, progress: int, message: str) -> None:
+        """Report progress if callback is set."""
+        if self._progress_callback:
+            self._progress_callback(progress, message)
+
+    def _format_time(self, seconds: float) -> str:
+        """Format seconds into a human-readable string (e.g., '2m 30s', '1h 15m')."""
+        if seconds < 0:
+            return "0s"
+
+        seconds = int(seconds)
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            secs = seconds % 60
+            return f"{minutes}m {secs}s" if secs > 0 else f"{minutes}m"
+        else:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            return f"{hours}h {minutes}m" if minutes > 0 else f"{hours}h"
+
+    def run(
+        self,
+        feature_settings = None,  #TODO: Specify the type of the parameters
+        options_settins = None,  #TODO: Specify the type of the parameters
+        other_settings = None,  #TODO: Specify the type of the parameters
+        calibration_settings = None,  #TODO: Specify the type of the parameters
+        step_callback: Optional[Callable[[Any, int], bool]] = None
+    ) -> SwmmRunResult:
+        """
+        Run SWMM simulation using pyswmm.
+        
+        :param inp_path: Path to INP file
+        :param rpt_path: Path for RPT output (optional, derived from inp_path if not provided)
+        :param out_path: Path for OUT binary output (optional, derived from inp_path if not provided)
+        :return: SwmmRunResult with simulation results
+        """
+        result = SwmmRunResult()
+
+        if not os.path.isfile(self.inp_path):
+            result.status = RunStatus.ERROR
+            result.errors.append(f"INP file not found: {self.inp_path}")
+            tools_log.log_error(f"INP file not found: {self.inp_path}")
+            return result
+
+        validation = self.validate_inp(self.inp_path)
+        if not validation["valid"]:
+            result.status = RunStatus.ERROR
+            result.errors.append(f"INP file validation failed: {self.inp_path}")
+            tools_log.log_error(f"INP file validation failed: {self.inp_path}")
+            return result
+
+        result.inp_path = self.inp_path
+        result.rpt_path = self.rpt_path
+        result.out_path = self.out_path
+
+        # Generate temporary rpt and out file paths
+        if self.rpt_path is None:
+            pass  #TODO: Generate temporary rpt file path
+        if self.out_path is None:
+            pass  #TODO: Generate temporary out file path
+
+        #TODO: Modify the INP file with the feature settings, options settings, other settings and calibration settings
+
+        self._report_progress(5, "Starting SWMM simulation...")
+        tools_log.log_info(f"Running SWMM simulation: {self.inp_path}")
+
+        return self._run_with_pyswmm(result, step_callback)
+
+    def _run_with_pyswmm(self, result: SwmmRunResult, step_callback: Optional[Callable[[Any, int], bool]] = None) -> SwmmRunResult:
+        """
+        Run simulation using pyswmm library.
+        
+        :param result: SwmmRunResult object to populate
+        :return: Updated SwmmRunResult
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            from pyswmm import Simulation
+
+            self._report_progress(10, "Initializing SWMM engine...")
+
+            # Create simulation with output files
+            with Simulation(
+                inputfile=result.inp_path,
+                reportfile=result.rpt_path,
+                outputfile=result.out_path
+            ) as sim:
+
+                self._report_progress(15, "SWMM engine initialized, starting simulation...")
+
+                last_progress = 15
+                last_report_time = time.time()
+                real_start_time = time.time()
+                step_count = 0
+
+                # Step through simulation
+                for step in sim:
+                    step_count += 1
+                    percent = sim.percent_complete
+
+                    # Map 0.0-1.0 to 15-100% progress range
+                    sim_progress = min(100, int(15 + percent * 85))
+
+                    # Only report every 0.5 seconds to avoid flooding
+                    current_real_time = time.time()
+                    if sim_progress != last_progress and (current_real_time - last_report_time) >= 0.5:
+                        # Calculate ETA based on average step duration
+                        elapsed_real = current_real_time - real_start_time
+                        if percent > 0:
+                            estimated_total_time = elapsed_real / percent
+                            remaining_real = estimated_total_time - elapsed_real
+                        else:
+                            remaining_real = 0
+
+                        remaining_str = self._format_time(remaining_real)
+                        datetime_str = sim.current_time.strftime("%Y-%m-%d %H:%M:%S")
+
+                        progress_msg = f"ETA: {remaining_str} | {datetime_str}"
+                        self._report_progress(sim_progress, progress_msg)
+                        last_progress = sim_progress
+                        last_report_time = current_real_time
+
+                    # Call user callback if provided
+                    if step_callback:
+                        continue_simulation = step_callback(sim, step_count)
+                        if not continue_simulation:
+                            tools_log.log_info(f"Simulation stopped by callback at step {step_count}")
+                            break
+
+                result.routing_steps = step_count
+
+                # Get simulation statistics after completion
+                try:
+                    result.flow_routing_error = sim.flow_routing_error
+                    result.runoff_error = sim.runoff_error
+                except AttributeError:
+                    pass
+
+            self._report_progress(90, "Simulation completed, checking results...")
+
+            # Check if output files were created
+            if os.path.isfile(result.rpt_path):
+                # Parse RPT for errors/warnings
+                self._parse_rpt_status(result)
+            else:
+                result.status = RunStatus.ERROR
+                result.errors.append("RPT file was not created")
+
+            result.duration_seconds = time.time() - start_time
+
+            # Determine final status
+            if result.status == RunStatus.NOT_RUN:
+                if result.errors:
+                    result.status = RunStatus.ERROR
+                elif result.warnings:
+                    result.status = RunStatus.WARNING
+                else:
+                    result.status = RunStatus.SUCCESS
+
+            self._report_progress(100, f"Simulation finished: {result.status.value}")
+            tools_log.log_info(
+                f"SWMM simulation completed: {result.status.value} "
+                f"({result.duration_seconds:.2f}s, {result.routing_steps} steps)"
+            )
+
+        except ImportError as e:
+            result.status = RunStatus.ERROR
+            result.errors.append(f"pyswmm not installed: {e}. Install with: pip install pyswmm")
+            tools_log.log_error(f"pyswmm not installed: {e}")
+
+        except Exception as e:
+            result.status = RunStatus.ERROR
+            result.errors.append(str(e))
+            tools_log.log_error(f"SWMM simulation error: {e}")
+            result.duration_seconds = time.time() - start_time
+
+        return result
+
+
+    def _parse_rpt_status(self, result: SwmmRunResult) -> None:
+        """
+        Parse RPT file for errors and warnings.
+        
+        :param result: SwmmRunResult to update
+        """
+        try:
+            with open(result.rpt_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+
+            lines = content.split('\n')
+
+            for line in lines:
+                line_stripped = line.strip()
+                line_lower = line_stripped.lower()
+
+                # Check for run errors
+                if 'run was unsuccessful' in line_lower:
+                    result.errors.append("SWMM run was unsuccessful")
+                    result.status = RunStatus.ERROR
+
+                if 'error' in line_lower and 'error:' in line_lower:
+                    result.errors.append(line_stripped)
+                    result.status = RunStatus.ERROR
+
+                # Check for warnings
+                if line_lower.startswith('warning'):
+                    result.warnings.append(line_stripped)
+
+        except Exception as e:
+            tools_log.log_warning(f"Could not parse RPT file for status: {e}")
+
+    def validate_inp(self, inp_path: str) -> Dict[str, Any]:
+        """
+        Validate an INP file without running full simulation.
+        
+        Uses swmm-api for parsing validation.
+        
+        :param inp_path: Path to INP file
+        :return: Validation result dictionary
+        """
+        validation = {
+            "valid": False,
+            "errors": [],
+            "warnings": [],
+            "info": {}
+        }
+
+        if not os.path.isfile(inp_path):
+            validation["errors"].append(f"File not found: {inp_path}")
+            return validation
+
+        try:
+            from swmm_api import read_inp_file
+
+            inp = read_inp_file(inp_path)
+
+            # Get basic info
+            validation["info"]["title"] = getattr(inp.TITLE, 'title', 'N/A') if hasattr(inp, 'TITLE') else 'N/A'
+            validation["info"]["junctions"] = len(inp.JUNCTIONS) if hasattr(inp, 'JUNCTIONS') and inp.JUNCTIONS else 0
+            validation["info"]["conduits"] = len(inp.CONDUITS) if hasattr(inp, 'CONDUITS') and inp.CONDUITS else 0
+            validation["info"]["outfalls"] = len(inp.OUTFALLS) if hasattr(inp, 'OUTFALLS') and inp.OUTFALLS else 0
+            validation["info"]["subcatchments"] = len(inp.SUBCATCHMENTS) if hasattr(inp, 'SUBCATCHMENTS') and inp.SUBCATCHMENTS else 0
+            validation["info"]["storage"] = len(inp.STORAGE) if hasattr(inp, 'STORAGE') and inp.STORAGE else 0
+            validation["info"]["pumps"] = len(inp.PUMPS) if hasattr(inp, 'PUMPS') and inp.PUMPS else 0
+            validation["info"]["orifices"] = len(inp.ORIFICES) if hasattr(inp, 'ORIFICES') and inp.ORIFICES else 0
+            validation["info"]["weirs"] = len(inp.WEIRS) if hasattr(inp, 'WEIRS') and inp.WEIRS else 0
+
+            validation["valid"] = True
+            tools_log.log_info(f"INP validation successful: {inp_path}")
+
+        except Exception as e:
+            validation["errors"].append(str(e))
+            tools_log.log_error(f"INP validation failed: {e}")
+
+        return validation
+
+    def export_rpt(self, to: ExportDataSource):
+        """
+        Export the RPT file to a specific datasource
+        """
+
+        if to == ExportDataSource.DATABASE:
+            rpt_handler = SwmmRptHandler()
+            rpt_handler_loaded = rpt_handler.load_result(self.rpt_path)
+            if not rpt_handler_loaded:
+                tools_log.log_error(f"Failed to load RPT file: {self.rpt_path}")
+                return
+            rpt_handler.export_to_database()
+        elif to == ExportDataSource.FROST:
+            out_handler = SwmmOutHandler()
+            out_handler_loaded = out_handler.load_result(self.out_path)
+            if not out_handler_loaded:
+                tools_log.log_error(f"Failed to load OUT file: {self.out_path}")
+                return
+            out_handler.export_to_frost()
