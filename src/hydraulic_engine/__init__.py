@@ -16,43 +16,12 @@ __author__ = "BGEO"
 __email__ = "info@bgeo.es"
 
 from .config import config
-from .utils import tools_log
-
-# Export connection functions at package level for convenience
-from .utils.tools_db import (
-    create_pg_connection,
-    create_gpkg_connection,
-    create_sqlite_connection,
-    get_connection,
-    close_connection,
-)
-
-# Export SWMM classes for direct access
-from .swmm import SwmmRunner, SwmmInpHandler, SwmmRptHandler, SwmmOutHandler, SwmmResultHandler
-
-# Export EPANET classes for direct access
-from .epanet import EpanetRunner, EpanetInpHandler, EpanetRptHandler
+from . import swmm
 
 __all__ = [
     "__version__",
     "__author__",
     "__email__",
     "config",
-    "tools_log",
-    # Connection functions
-    "create_pg_connection",
-    "create_gpkg_connection",
-    "create_sqlite_connection",
-    "get_connection",
-    "close_connection",
-    # SWMM
-    "SwmmRunner",
-    "SwmmInpHandler",
-    "SwmmRptHandler",
-    "SwmmOutHandler",
-    "SwmmResultHandler",
-    # EPANET
-    "EpanetRunner",
-    "EpanetInpHandler",
-    "EpanetRptHandler",
+    "swmm",
 ]

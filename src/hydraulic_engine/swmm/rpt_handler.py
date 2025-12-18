@@ -7,11 +7,10 @@ or (at your option) any later version.
 # -*- coding: utf-8 -*-
 from typing import Any, Dict, List, Optional
 
-from ..utils import tools_log
-from .result_handler import SwmmResultHandler
+from .file_handler import SwmmResultHandler, SwmmFileHandler
 
 
-class SwmmRptHandler(SwmmResultHandler):
+class SwmmRptHandler(SwmmFileHandler, SwmmResultHandler):
     """
     Handler for SWMM RPT (report) files.
     
@@ -19,7 +18,7 @@ class SwmmRptHandler(SwmmResultHandler):
     
     Example usage:
         handler = SwmmRptHandler()
-        handler.load_result("results.rpt")
+        handler.load_file("results.rpt")
         
         # Get results
         node_results = handler.get_node_results()
@@ -30,39 +29,42 @@ class SwmmRptHandler(SwmmResultHandler):
     def export_to_database(self) -> bool:
         pass  #TODO: Implement export to database
 
+    def export_to_frost(self) -> bool:
+        pass  #TODO: Implement export to frost
+
     # =========================================================================
     # Analysis Information
     # =========================================================================
 
     def get_analysis_options(self) -> Optional[Dict[str, Any]]:
         """Get analysis options used in simulation."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'analysis_options'):
-                return self.rpt.analysis_options
+            if hasattr(self.file_object, 'analysis_options'):
+                return self.file_object.analysis_options
         except Exception:
             pass
         return None
 
     def get_runoff_quantity_continuity(self) -> Optional[Dict[str, Any]]:
         """Get runoff quantity continuity results."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'runoff_quantity_continuity'):
-                return self.rpt.runoff_quantity_continuity
+            if hasattr(self.file_object, 'runoff_quantity_continuity'):
+                return self.file_object.runoff_quantity_continuity
         except Exception:
             pass
         return None
 
     def get_flow_routing_continuity(self) -> Optional[Dict[str, Any]]:
         """Get flow routing continuity results."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'flow_routing_continuity'):
-                return self.rpt.flow_routing_continuity
+            if hasattr(self.file_object, 'flow_routing_continuity'):
+                return self.file_object.flow_routing_continuity
         except Exception:
             pass
         return None
@@ -73,44 +75,44 @@ class SwmmRptHandler(SwmmResultHandler):
 
     def get_node_depth_summary(self) -> Optional[Any]:
         """Get node depth summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'node_depth_summary'):
-                return self.rpt.node_depth_summary
+            if hasattr(self.file_object, 'node_depth_summary'):
+                return self.file_object.node_depth_summary
         except Exception:
             pass
         return None
 
     def get_node_inflow_summary(self) -> Optional[Any]:
         """Get node inflow summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'node_inflow_summary'):
-                return self.rpt.node_inflow_summary
+            if hasattr(self.file_object, 'node_inflow_summary'):
+                return self.file_object.node_inflow_summary
         except Exception:
             pass
         return None
 
     def get_node_surcharge_summary(self) -> Optional[Any]:
         """Get node surcharge summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'node_surcharge_summary'):
-                return self.rpt.node_surcharge_summary
+            if hasattr(self.file_object, 'node_surcharge_summary'):
+                return self.file_object.node_surcharge_summary
         except Exception:
             pass
         return None
 
     def get_node_flooding_summary(self) -> Optional[Any]:
         """Get node flooding summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'node_flooding_summary'):
-                return self.rpt.node_flooding_summary
+            if hasattr(self.file_object, 'node_flooding_summary'):
+                return self.file_object.node_flooding_summary
         except Exception:
             pass
         return None
@@ -121,33 +123,33 @@ class SwmmRptHandler(SwmmResultHandler):
 
     def get_link_flow_summary(self) -> Optional[Any]:
         """Get link flow summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'link_flow_summary'):
-                return self.rpt.link_flow_summary
+            if hasattr(self.file_object, 'link_flow_summary'):
+                return self.file_object.link_flow_summary
         except Exception:
             pass
         return None
 
     def get_conduit_surcharge_summary(self) -> Optional[Any]:
         """Get conduit surcharge summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'conduit_surcharge_summary'):
-                return self.rpt.conduit_surcharge_summary
+            if hasattr(self.file_object, 'conduit_surcharge_summary'):
+                return self.file_object.conduit_surcharge_summary
         except Exception:
             pass
         return None
 
     def get_pumping_summary(self) -> Optional[Any]:
         """Get pumping summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'pumping_summary'):
-                return self.rpt.pumping_summary
+            if hasattr(self.file_object, 'pumping_summary'):
+                return self.file_object.pumping_summary
         except Exception:
             pass
         return None
@@ -158,11 +160,11 @@ class SwmmRptHandler(SwmmResultHandler):
 
     def get_subcatchment_runoff_summary(self) -> Optional[Any]:
         """Get subcatchment runoff summary."""
-        if not self.rpt:
+        if not self.file_object:
             return None
         try:
-            if hasattr(self.rpt, 'subcatchment_runoff_summary'):
-                return self.rpt.subcatchment_runoff_summary
+            if hasattr(self.file_object, 'subcatchment_runoff_summary'):
+                return self.file_object.subcatchment_runoff_summary
         except Exception:
             pass
         return None
@@ -174,11 +176,11 @@ class SwmmRptHandler(SwmmResultHandler):
     def get_errors(self) -> List[str]:
         """Get list of errors from report."""
         errors = []
-        if not self.rpt_path:
+        if not self.file_path:
             return errors
 
         try:
-            with open(self.rpt_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     if 'ERROR' in line.upper():
                         errors.append(line.strip())
@@ -189,11 +191,11 @@ class SwmmRptHandler(SwmmResultHandler):
     def get_warnings(self) -> List[str]:
         """Get list of warnings from report."""
         warnings = []
-        if not self.rpt_path:
+        if not self.file_path:
             return warnings
 
         try:
-            with open(self.rpt_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     if 'WARNING' in line.upper():
                         warnings.append(line.strip())
@@ -203,11 +205,11 @@ class SwmmRptHandler(SwmmResultHandler):
 
     def was_successful(self) -> bool:
         """Check if the simulation was successful."""
-        if not self.rpt_path:
+        if not self.file_path:
             return False
 
         try:
-            with open(self.rpt_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
                 return 'Analysis begun' in content and 'run was unsuccessful' not in content.lower()
         except Exception:
@@ -224,7 +226,7 @@ class SwmmRptHandler(SwmmResultHandler):
         :return: Dictionary with summary information
         """
         summary = {
-            "file": self.rpt_path,
+            "file": self.file_path,
             "loaded": self.is_loaded(),
             "successful": self.was_successful(),
             "errors": self.get_errors(),
@@ -245,7 +247,7 @@ class SwmmRptHandler(SwmmResultHandler):
         
         :return: SwmmReport object or None
         """
-        return self.rpt
+        return self.file_object
 
     def get_section(self, section_name: str) -> Optional[Any]:
         """
@@ -254,6 +256,6 @@ class SwmmRptHandler(SwmmResultHandler):
         :param section_name: Section attribute name
         :return: Section data or None
         """
-        if not self.rpt:
+        if not self.file_object:
             return None
-        return getattr(self.rpt, section_name, None)
+        return getattr(self.file_object, section_name, None)

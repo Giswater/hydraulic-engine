@@ -5,14 +5,10 @@ General Public License as published by the Free Software Foundation, either vers
 or (at your option) any later version.
 """
 # -*- coding: utf-8 -*-
-import os
-from typing import Optional
-
-from ..utils import tools_log
-from .result_handler import SwmmResultHandler
+from .file_handler import SwmmResultHandler, SwmmFileHandler
 
 
-class SwmmOutHandler(SwmmResultHandler):
+class SwmmOutHandler(SwmmFileHandler, SwmmResultHandler):
     """
     Handler for SWMM OUT (output) files.
     
@@ -20,8 +16,11 @@ class SwmmOutHandler(SwmmResultHandler):
     
     Example usage:
         handler = SwmmOutHandler()
-        handler.load_result("results.out")        
+        handler.load_file("results.out")        
     """
+
+    def export_to_database(self) -> bool:
+        pass  #TODO: Implement export to database
 
     def export_to_frost(self) -> bool:
         pass  #TODO: Implement export to frost

@@ -6,12 +6,15 @@ or (at your option) any later version.
 """
 # -*- coding: utf-8 -*-
 import os
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
+
 from ..utils.enums import RunStatus, ExportDataSource
 from .rpt_handler import SwmmRptHandler
 from .out_handler import SwmmOutHandler
-
+from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
+from .inp_handler import SwmmInpHandler
 from ..utils import tools_log
 
 
@@ -68,6 +71,9 @@ class SwmmRunner:
         self.rpt_path = rpt_path
         self.out_path = out_path
         self.result: Optional[SwmmRunResult] = None
+        self.inp: Optional[SwmmInpHandler] = None
+        self.rpt: Optional[SwmmRptHandler] = None
+        self.out: Optional[SwmmOutHandler] = None
         self._progress_callback = progress_callback
 
     def _report_progress(self, progress: int, message: str) -> None:
@@ -94,10 +100,9 @@ class SwmmRunner:
 
     def run(
         self,
-        feature_settings = None,  #TODO: Specify the type of the parameters
-        options_settins = None,  #TODO: Specify the type of the parameters
-        other_settings = None,  #TODO: Specify the type of the parameters
-        calibration_settings = None,  #TODO: Specify the type of the parameters
+        feature_settings: Optional[SwmmFeatureSettings] = None,
+        options_settings: Optional[SwmmOptionsSettings] = None,
+        other_settings: Optional[SwmmOtherSettings] = None,
         step_callback: Optional[Callable[[Any, int], bool]] = None
     ) -> SwmmRunResult:
         """
@@ -110,30 +115,46 @@ class SwmmRunner:
         """
         result = SwmmRunResult()
 
-        if not os.path.isfile(self.inp_path):
+        self.inp = SwmmInpHandler()
+        if not self.inp.load_file(self.inp_path):
             result.status = RunStatus.ERROR
-            result.errors.append(f"INP file not found: {self.inp_path}")
-            tools_log.log_error(f"INP file not found: {self.inp_path}")
+            result.errors.append(f"Failed to load INP file: {self.inp_path}")
+            tools_log.log_error(f"Failed to load INP file: {self.inp_path}")
             return result
 
-        validation = self.validate_inp(self.inp_path)
+        validation = self.inp.validate_inp()
         if not validation["valid"]:
             result.status = RunStatus.ERROR
             result.errors.append(f"INP file validation failed: {self.inp_path}")
             tools_log.log_error(f"INP file validation failed: {self.inp_path}")
             return result
 
-        result.inp_path = self.inp_path
-        result.rpt_path = self.rpt_path
-        result.out_path = self.out_path
+        self.rpt = SwmmRptHandler()
+        self.out = SwmmOutHandler()
 
         # Generate temporary rpt and out file paths
-        if self.rpt_path is None:
-            pass  #TODO: Generate temporary rpt file path
-        if self.out_path is None:
-            pass  #TODO: Generate temporary out file path
+        self.rpt.file_path = str(self.rpt.get_file_path(output_path=self.rpt_path, extension=".rpt"))
+        self.out.file_path = str(self.out.get_file_path(output_path=self.out_path, extension=".out"))
 
-        #TODO: Modify the INP file with the feature settings, options settings, other settings and calibration settings
+        result.inp_path = self.inp.file_path
+        result.rpt_path = self.rpt.file_path
+        result.out_path = self.out.file_path
+
+        # Modify the INP file with the feature settings, options settings and other settings
+        try:
+            self.inp._update_inp_from_settings(
+                feature_settings=feature_settings,
+                options_settings=options_settings,
+                other_settings=other_settings,
+            )
+            temp_inp_path = self.inp.get_file_path(None, ".inp")
+            self.inp.write(output_path=temp_inp_path)
+            result.inp_path = str(temp_inp_path)
+        except Exception as e:
+            result.status = RunStatus.ERROR
+            result.errors.append(f"Failed to update INP file with settings: {e}")
+            tools_log.log_error(f"Failed to update INP file with settings: {e}")
+            return result
 
         self._report_progress(5, "Starting SWMM simulation...")
         tools_log.log_info(f"Running SWMM simulation: {self.inp_path}")
@@ -252,7 +273,6 @@ class SwmmRunner:
 
         return result
 
-
     def _parse_rpt_status(self, result: SwmmRunResult) -> None:
         """
         Parse RPT file for errors and warnings.
@@ -285,54 +305,9 @@ class SwmmRunner:
         except Exception as e:
             tools_log.log_warning(f"Could not parse RPT file for status: {e}")
 
-    def validate_inp(self, inp_path: str) -> Dict[str, Any]:
+    def export_result(self, to: ExportDataSource):
         """
-        Validate an INP file without running full simulation.
-        
-        Uses swmm-api for parsing validation.
-        
-        :param inp_path: Path to INP file
-        :return: Validation result dictionary
-        """
-        validation = {
-            "valid": False,
-            "errors": [],
-            "warnings": [],
-            "info": {}
-        }
-
-        if not os.path.isfile(inp_path):
-            validation["errors"].append(f"File not found: {inp_path}")
-            return validation
-
-        try:
-            from swmm_api import read_inp_file
-
-            inp = read_inp_file(inp_path)
-
-            # Get basic info
-            validation["info"]["title"] = getattr(inp.TITLE, 'title', 'N/A') if hasattr(inp, 'TITLE') else 'N/A'
-            validation["info"]["junctions"] = len(inp.JUNCTIONS) if hasattr(inp, 'JUNCTIONS') and inp.JUNCTIONS else 0
-            validation["info"]["conduits"] = len(inp.CONDUITS) if hasattr(inp, 'CONDUITS') and inp.CONDUITS else 0
-            validation["info"]["outfalls"] = len(inp.OUTFALLS) if hasattr(inp, 'OUTFALLS') and inp.OUTFALLS else 0
-            validation["info"]["subcatchments"] = len(inp.SUBCATCHMENTS) if hasattr(inp, 'SUBCATCHMENTS') and inp.SUBCATCHMENTS else 0
-            validation["info"]["storage"] = len(inp.STORAGE) if hasattr(inp, 'STORAGE') and inp.STORAGE else 0
-            validation["info"]["pumps"] = len(inp.PUMPS) if hasattr(inp, 'PUMPS') and inp.PUMPS else 0
-            validation["info"]["orifices"] = len(inp.ORIFICES) if hasattr(inp, 'ORIFICES') and inp.ORIFICES else 0
-            validation["info"]["weirs"] = len(inp.WEIRS) if hasattr(inp, 'WEIRS') and inp.WEIRS else 0
-
-            validation["valid"] = True
-            tools_log.log_info(f"INP validation successful: {inp_path}")
-
-        except Exception as e:
-            validation["errors"].append(str(e))
-            tools_log.log_error(f"INP validation failed: {e}")
-
-        return validation
-
-    def export_rpt(self, to: ExportDataSource):
-        """
-        Export the RPT file to a specific datasource
+        Export the result file to a specific datasource
         """
 
         if to == ExportDataSource.DATABASE:
@@ -341,6 +316,7 @@ class SwmmRunner:
             if not rpt_handler_loaded:
                 tools_log.log_error(f"Failed to load RPT file: {self.rpt_path}")
                 return
+            self.rpt = rpt_handler
             rpt_handler.export_to_database()
         elif to == ExportDataSource.FROST:
             out_handler = SwmmOutHandler()
@@ -348,4 +324,5 @@ class SwmmRunner:
             if not out_handler_loaded:
                 tools_log.log_error(f"Failed to load OUT file: {self.out_path}")
                 return
+            self.out = out_handler
             out_handler.export_to_frost()

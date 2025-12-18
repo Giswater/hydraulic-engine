@@ -14,5 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database connection files
 - SWMM runner file
 - SWMM inp, rpt and out handler files
+- Parameter management to the SWMM simulation
+- SWMM models file
 
 [unreleased]: https://github.com/Giswater/hydraulic_engine/commits/master/
