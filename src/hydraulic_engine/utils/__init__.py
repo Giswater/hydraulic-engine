@@ -9,6 +9,10 @@ Utils module - Contains utility functions for hydraulic calculations.
 # -*- coding: utf-8 -*-
 from .enums import ExportDataSource, RunStatus
 from .tools_db import HeDbDao, HePgDao, HeSqliteDao, HeGpkgDao, DbType
+from .tools_db import create_pg_connection, create_gpkg_connection, create_sqlite_connection
+from .tools_db import get_connection, close_connection
+from .tools_api import HeApiClient, HeFrostClient, ApiType
+from .tools_api import create_frost_connection, get_api_client, close_api_client
 from .tools_log import set_logger, log_debug, log_info, log_warning, log_error, HeLogger
 from .tools_os import get_datadir
 
@@ -20,6 +24,17 @@ __all__ = [
     "HeSqliteDao",
     "HeGpkgDao",
     "DbType",
+    "create_pg_connection",
+    "create_gpkg_connection",
+    "create_sqlite_connection",
+    "get_connection",
+    "close_connection",
+    "HeApiClient",
+    "HeFrostClient",
+    "ApiType",
+    "create_frost_connection",
+    "get_api_client",
+    "close_api_client",
     "set_logger",
     "log_debug",
     "log_info",

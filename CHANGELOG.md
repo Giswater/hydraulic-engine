@@ -20,5 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EPANET inp, rpt and out handler files
 - Parameter management to the EPANET simulation
 - EPANET models file
+- **FROST-Server / SensorThings API integration**
+  - `tools_api.py`: Abstract API client framework with FROST-Server implementation
+  - `tools_sensorthings.py`: High-level helper functions for SensorThings API operations
+  - `create_frost_connection()`: Global API client connection management
+  - `export_to_frost()`: Export SWMM/EPANET simulation results to FROST-Server
+  - Support for batch operations to efficiently create/update Things, Datastreams, and Observations
+  - Integration with existing export framework (`ExportDataSource.FROST`)
 
 [unreleased]: https://github.com/Giswater/hydraulic_engine/commits/master/

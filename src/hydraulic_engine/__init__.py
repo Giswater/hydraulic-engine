@@ -18,6 +18,17 @@ __email__ = "info@bgeo.es"
 from .config import config
 from . import swmm
 from . import epanet
+from .utils import (
+    ExportDataSource,
+    create_pg_connection,
+    create_gpkg_connection,
+    create_sqlite_connection,
+    get_connection,
+    close_connection,
+    create_frost_connection,
+    get_api_client,
+    close_api_client,
+)
 
 __all__ = [
     "__version__",
@@ -26,4 +37,13 @@ __all__ = [
     "config",
     "swmm",
     "epanet",
+    "ExportDataSource",
+    "create_pg_connection",
+    "create_gpkg_connection",
+    "create_sqlite_connection",
+    "get_connection",
+    "close_connection",
+    "create_frost_connection",
+    "get_api_client",
+    "close_api_client",
 ]

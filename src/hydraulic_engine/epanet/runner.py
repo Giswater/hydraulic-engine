@@ -12,12 +12,14 @@ from wntr.epanet.util import EN
 
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Callable
+from datetime import datetime
 
 from ..utils.enums import RunStatus, ExportDataSource
 from ..utils import tools_log
 from .bin_handler import EpanetBinHandler
 from .inp_handler import EpanetInpHandler
 from .models import EpanetFeatureSettings, EpanetOptionsSettings, EpanetOtherSettings
+from ..utils.tools_api import HeFrostClient
 
 
 @dataclass
@@ -385,8 +387,33 @@ class EpanetRunner:
         else:
             return f"{hours:02d}:{minutes:02d}"
 
-    def export_result(self, to: ExportDataSource):
+    def export_result(
+            self,
+            to: ExportDataSource,
+            result_id: str,
+            batch_size: int = 50,
+            max_workers: int = 4,
+            crs_from: int = 25831,
+            crs_to: int = 4326,
+            start_time: Optional[datetime] = None,
+            client: Optional[HeFrostClient] = None,
+        ) -> bool:
         """
         Export the result file to a specific datasource
         """
-        pass
+
+        if to == ExportDataSource.DATABASE:
+            pass
+        elif to == ExportDataSource.FROST:
+            self.bin.export_to_frost(
+                inp_handler=self.inp,
+                result_id=result_id,
+                batch_size=batch_size,
+                max_workers=max_workers,
+                crs_from=crs_from,
+                crs_to=crs_to,
+                start_time=start_time,
+                client=client
+            )
+
+        return True

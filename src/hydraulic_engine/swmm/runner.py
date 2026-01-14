@@ -8,8 +8,9 @@ or (at your option) any later version.
 import os
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, List, Optional, Callable
 from pyswmm import Simulation
+from datetime import datetime
 
 from ..utils.enums import RunStatus, ExportDataSource
 from .rpt_handler import SwmmRptHandler
@@ -17,6 +18,7 @@ from .out_handler import SwmmOutHandler
 from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
 from .inp_handler import SwmmInpHandler
 from ..utils import tools_log
+from ..utils.tools_api import HeFrostClient
 
 
 @dataclass
@@ -248,13 +250,13 @@ class SwmmRunner:
             if os.path.isfile(result.rpt_path):
                 # Parse RPT for errors/warnings
                 self._parse_rpt_status(result)
-                self.rpt.load_result(result.rpt_path)
+                self.rpt.load_file(result.rpt_path)
             else:
                 result.status = RunStatus.ERROR
                 result.errors.append("RPT file was not created")
 
             if os.path.isfile(result.out_path):
-                self.out.load_result(result.out_path)
+                self.out.load_file(result.out_path)
             else:
                 result.status = RunStatus.ERROR
                 result.errors.append("OUT file was not created")
@@ -321,7 +323,17 @@ class SwmmRunner:
         except Exception as e:
             tools_log.log_warning(f"Could not parse RPT file for status: {e}")
 
-    def export_result(self, to: ExportDataSource):
+    def export_result(
+            self,
+            to: ExportDataSource,
+            result_id: str,
+            batch_size: int = 50,
+            max_workers: int = 4,
+            crs_from: int = 25831,
+            crs_to: int = 4326,
+            start_time: Optional[datetime] = None,
+            client: Optional[HeFrostClient] = None,
+        ) -> bool:
         """
         Export the result file to a specific datasource
         """
@@ -329,4 +341,15 @@ class SwmmRunner:
         if to == ExportDataSource.DATABASE:
             self.rpt.export_to_database()
         elif to == ExportDataSource.FROST:
-            self.out.export_to_frost()
+            self.out.export_to_frost(
+                inp_handler=self.inp,
+                result_id=result_id,
+                batch_size=batch_size,
+                max_workers=max_workers,
+                crs_from=crs_from,
+                crs_to=crs_to,
+                start_time=start_time,
+                client=client,
+            )
+
+        return True
