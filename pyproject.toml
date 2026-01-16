@@ -7,7 +7,8 @@ name = "hydraulic-engine"
 version = "0.1.0"
 description = "A Python package for managing hydraulic calculation actions: EPANET/SWMM simulations, RPT file imports, and more"
 readme = "README.md"
-license = {text = "GPL-3.0-or-later"}
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [
     {name = "BGEO", email = "info@bgeo.es"}
@@ -26,7 +27,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -40,10 +40,9 @@ dependencies = [
     "pyswmm>=2.0.0",
     "swmm-api>=0.4.60",
     "wntr>=1.0.0",
-    "pandas>=2.0.0",
-    "numpy>=1.24.0",
     "psycopg[binary]>=3.1.0",
     "requests>=2.28.0",
+    "pyproj>=3.7.0"
 ]
 
 [project.optional-dependencies]
@@ -60,10 +59,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bgeo-gis/hydraulic-engine"
-Documentation = "https://github.com/bgeo-gis/hydraulic-engine#readme"
-Repository = "https://github.com/bgeo-gis/hydraulic-engine.git"
-Issues = "https://github.com/bgeo-gis/hydraulic-engine/issues"
+Homepage = "https://github.com/Giswater/hydraulic-engine"
+Documentation = "https://github.com/Giswater/hydraulic-engine#readme"
+Repository = "https://github.com/Giswater/hydraulic-engine.git"
+Issues = "https://github.com/Giswater/hydraulic-engine/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

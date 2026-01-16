@@ -12,7 +12,7 @@ A Python package for managing hydraulic calculation actions: EPANET/SWMM simulat
 
 ## Installation
 
-### From PyPI (when published)
+### From PyPI
 
 ```bash
 pip install hydraulic-engine
@@ -189,14 +189,17 @@ hydraulic-engine/
 │       │   │   ├── runner.py            # Run SWMM simulations
 │       │   │   ├── inp_handler.py       # Parse/write SWMM INP files
 │       │   │   └── rpt_handler.py       # Parse SWMM RPT files
+|       |   |   └── out_handler.py       # Parse SWMM OUT files
 │       │   ├── epanet/                  # EPANET-specific functionality
 │       │   │   ├── runner.py            # Run EPANET simulations
 │       │   │   ├── inp_handler.py       # Parse/write EPANET INP files
-│       │   │   └── rpt_handler.py       # Parse EPANET RPT files
+│       │   │   └── bin_handler.py       # Parse EPANET BINARY files
 │       │   └── utils/                   # Shared utilities
 │       │       ├── tools_log.py
 │       │       ├── tools_db.py
+│       │       └── tools_api.py
 │       │       └── tools_config.py
+│       │       └── tools_sensorthings.py
 ├── tests/
 ├── pyproject.toml
 └── README.md
@@ -211,6 +214,7 @@ hydraulic-engine/
 | `SwmmRunner` | Run SWMM simulations |
 | `SwmmInpHandler` | Read/write SWMM INP files |
 | `SwmmRptHandler` | Parse SWMM RPT result files |
+| `SwmmOutHandler` | Parse SWMM OUT result files |
 
 ### EPANET Classes
 
@@ -218,7 +222,7 @@ hydraulic-engine/
 |-------|-------------|
 | `EpanetRunner` | Run EPANET simulations |
 | `EpanetInpHandler` | Read/write EPANET INP files |
-| `EpanetRptHandler` | Parse EPANET RPT result files |
+| `EpanetBinHandler` | Parse EPANET BIN result files |
 
 ### Connection Functions
 
@@ -236,8 +240,6 @@ hydraulic-engine/
 - pyswmm >= 2.0.0 (SWMM simulation engine)
 - swmm-api >= 0.4.60 (INP/RPT file parsing)
 - wntr >= 1.0.0 (EPANET simulations)
-- pandas >= 2.0.0
-- numpy >= 1.24.0
 - psycopg[binary] >= 3.1.0
 
 ## Development
