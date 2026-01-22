@@ -1,5 +1,12 @@
 # Hydraulic Engine
 
+| | |
+| --- | --- |
+| Testing | [![CI - Test](https://github.com/Giswater/hydraulic_engine/actions/workflows/publish-to-pypi.yml/badge.svg)](https://github.com/Giswater/hydraulic_engine/actions/workflows/publish-to-pypi.yml) |
+| Package | [![PyPI Latest Release](https://img.shields.io/pypi/v/hydraulic_engine.svg)](https://pypi.org/project/hydraulic_engine/) [![PyPI Downloads](https://img.shields.io/pypi/dm/hydraulic_engine.svg?label=PyPI%20downloads)](https://pypi.org/project/hydraulic_engine/) |
+| Meta | [![License - GNU GPL3](https://img.shields.io/pypi/l/hydraulic_engine.svg)](https://github.com/Giswater/hydraulic_engine/blob/main/LICENSE) |
+
+
 A Python package for managing hydraulic calculation actions: EPANET/SWMM simulations, RPT file imports, and more.
 
 ## Features
