@@ -403,20 +403,21 @@ class EpanetRunner:
             self,
             to: ExportDataSource,
             result_id: str,
-            batch_size: int = 50,
+            batch_size: int = 10,
             max_workers: int = 4,
             crs_from: int = 25831,
             crs_to: int = 4326,
             start_time: Optional[datetime] = None,
             round_decimals: int = 2,
             client: Optional[HeFrostClient] = None,
+            giswater_version: int = 4
         ) -> bool:
         """
         Export the result file to a specific datasource
         """
 
         if to == ExportDataSource.DATABASE:
-            return self.bin.export_to_database(result_id=result_id, inp_handler=self.inp, round_decimals=round_decimals, dao=client)
+            return self.bin.export_to_database(result_id=result_id, inp_handler=self.inp, round_decimals=round_decimals, dao=client, giswater_version=giswater_version)
         elif to == ExportDataSource.FROST:
             return self.bin.export_to_frost(
                 inp_handler=self.inp,

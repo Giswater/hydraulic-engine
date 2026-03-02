@@ -42,7 +42,8 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             result_id: str,
             inp_handler: EpanetInpHandler,
             round_decimals: int = 2,
-            dao: Optional[HePgDao] = None
+            dao: Optional[HePgDao] = None,
+            giswater_version: int = 4
         ) -> bool:
         """
         Export simulation results to Giswater database.
@@ -63,6 +64,7 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
         :param inp_handler: INP handler to get coordinates
         :param round_decimals: Number of decimal places to round the results (default: 2)
         :param dao: Database access object (optional, uses global connection if not provided)
+        :param giswater_version: Version of Giswater (default: 4)
         :return: True if export successful, False otherwise
         """
         if not self.is_loaded():
@@ -84,12 +86,12 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
 
             # Step 1: Clean previous results for this result_id
             tools_log.log_info("Cleaning previous results...")
-            if not _clean_previous_results(dao, result_id):
+            if not _clean_previous_results(dao, result_id, giswater_version):
                 return False
 
             # Step 2: Insert time series data into rpt_node
             tools_log.log_info("Inserting node results...")
-            node_count = _insert_node_results(dao, results, result_id, inp_handler, round_decimals)
+            node_count = _insert_node_results(dao, results, result_id, inp_handler, round_decimals, giswater_version)
             tools_log.log_info(f"Inserted {node_count} node result records")
 
             # Step 3: Insert time series data into rpt_arc
@@ -101,17 +103,18 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             tools_log.log_info("Post-processing arc results...")
             _post_process_arcs(dao, result_id)
 
-            # Step 5: Calculate and insert node statistics
-            tools_log.log_info("Calculating node statistics...")
-            _insert_node_stats(dao, result_id)
+            if giswater_version > 3:
+                # Step 5: Calculate and insert node statistics
+                tools_log.log_info("Calculating node statistics...")
+                _insert_node_stats(dao, result_id)
 
-            # Step 6: Calculate and insert arc statistics
-            tools_log.log_info("Calculating arc statistics...")
-            _insert_arc_stats(dao, result_id)
+                # Step 6: Calculate and insert arc statistics
+                tools_log.log_info("Calculating arc statistics...")
+                _insert_arc_stats(dao, result_id)
 
             # Step 8: Update rpt_cat_result and selectors
             tools_log.log_info("Updating result catalog and selectors...")
-            _finalize_import(dao, result_id)
+            _finalize_import(dao, result_id, giswater_version)
 
             # Commit all changes
             dao.commit()
@@ -268,7 +271,7 @@ def _seconds_to_time_str(seconds: int) -> str:
     return f"{h}:{m:02d}:{s:02d}"
 
 
-def _clean_previous_results(dao: HePgDao, result_id: str) -> bool:
+def _clean_previous_results(dao: HePgDao, result_id: str, giswater_version: int = 4) -> bool:
     """
     Clean previous results for the given result_id from all rpt tables.
     
@@ -279,11 +282,12 @@ def _clean_previous_results(dao: HePgDao, result_id: str) -> bool:
     tables_to_clean = [
         'rpt_node',
         'rpt_arc',
-        'rpt_node_stats',
-        'rpt_arc_stats',
         'rpt_energy_usage',
         'rpt_hydraulic_status'
     ]
+    if giswater_version > 3:
+        tables_to_clean.append('rpt_node_stats')
+        tables_to_clean.append('rpt_arc_stats')
 
     for table in tables_to_clean:
         sql = f"DELETE FROM {table} WHERE result_id = %s"
@@ -294,7 +298,7 @@ def _clean_previous_results(dao: HePgDao, result_id: str) -> bool:
     return True
 
 
-def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, result_id: str, inp_handler: EpanetInpHandler, round_decimals: int = 2) -> int:
+def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, result_id: str, inp_handler: EpanetInpHandler, round_decimals: int = 2, giswater_version: int = 4) -> int:
     """
     Insert time series node results into rpt_node table.
     
@@ -364,9 +368,11 @@ def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, resu
 
             records.append((result_id, node_id, time_str, top_elev, demand, head, pressure, quality))
 
+    elevation_column = 'elevation' if giswater_version == 3 else 'top_elev'
+
     # Bulk insert using executemany
-    sql = """
-        INSERT INTO rpt_node (result_id, node_id, time, top_elev, demand, head, press, quality)
+    sql = f"""
+        INSERT INTO rpt_node (result_id, node_id, time, {elevation_column}, demand, head, press, quality)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
 
@@ -615,7 +621,7 @@ def _insert_arc_stats(dao: HePgDao, result_id: str) -> None:
     dao.execute(sql, (result_id, result_id, result_id), commit=False)
 
 
-def _finalize_import(dao: HePgDao, result_id: str) -> None:
+def _finalize_import(dao: HePgDao, result_id: str, giswater_version: int = 4) -> None:
     """
     Finalize the import process:
     - Update rpt_cat_result with execution metadata
@@ -626,13 +632,22 @@ def _finalize_import(dao: HePgDao, result_id: str) -> None:
     :param result_id: Result identifier
     """
     # Update rpt_cat_result
-    sql_update_result = """
-        UPDATE rpt_cat_result 
-        SET exec_date = now(), cur_user = current_user, status = 2, 
-        expl_id = (SELECT array_agg(expl_id) FROM selector_expl WHERE cur_user = current_user AND expl_id > 0),
-        sector_id = (SELECT array_agg(sector_id) FROM selector_sector WHERE cur_user = current_user AND sector_id > 0)
-        WHERE result_id = %s
-    """
+    if giswater_version == 3:
+        sql_update_result = """
+            UPDATE rpt_cat_result 
+            SET exec_date = now(), cur_user = current_user, status = 2, 
+            expl_id = (SELECT array_agg(expl_id) FROM selector_expl WHERE cur_user = current_user AND expl_id > 0)[1]
+            WHERE result_id = %s
+        """
+    else:
+        sql_update_result = """
+            UPDATE rpt_cat_result 
+            SET exec_date = now(), cur_user = current_user, status = 2, 
+            expl_id = (SELECT array_agg(expl_id) FROM selector_expl WHERE cur_user = current_user AND expl_id > 0),
+            sector_id = (SELECT array_agg(sector_id) FROM selector_sector WHERE cur_user = current_user AND sector_id > 0)
+            WHERE result_id = %s
+        """
+
     dao.execute(sql_update_result, (result_id,), commit=False)
 
     # Set result selector for current user

@@ -327,7 +327,7 @@ class SwmmRunner:
             self,
             to: ExportDataSource,
             result_id: str,
-            batch_size: int = 50,
+            batch_size: int = 10,
             max_workers: int = 4,
             crs_from: int = 25831,
             crs_to: int = 4326,

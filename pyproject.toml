@@ -38,11 +38,11 @@ classifiers = [
 ]
 dependencies = [
     "pyswmm>=2.0.0",
-    "swmm-api>=0.4.60",
-    "wntr>=1.0.0",
+    "swmm-api==0.4.31",
+    "wntr==1.2.0",
     "psycopg[binary]>=3.1.0",
     "requests>=2.28.0",
-    "pyproj>=3.7.0"
+    "pyproj>=3.6.0"
 ]
 
 [project.optional-dependencies]
