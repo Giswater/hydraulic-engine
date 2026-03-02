@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-02
+
+### Changed
+
+- Make package compatible with Python 3.9
+- Make export to database for EPANET compatible with Giswater 3.5
+
 ## [0.2.0] - 2026-01-22
 
 ### Added
@@ -36,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support for batch operations to efficiently create/update Things, Datastreams, and Observations
   - Integration with existing export framework (`ExportDataSource.FROST`)
 
-[unreleased]: https://github.com/Giswater/hydraulic_engine/compare/v0.2.0...main
+[unreleased]: https://github.com/Giswater/hydraulic_engine/compare/v0.3.0...main
+[0.3.0]: https://github.com/Giswater/hydraulic_engine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Giswater/hydraulic_engine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Giswater/hydraulic_engine/releases/tag/v0.1.0
