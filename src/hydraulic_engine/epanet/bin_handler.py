@@ -503,7 +503,8 @@ def _post_process_arcs(dao: HePgDao, result_id: str) -> None:
         UPDATE rpt_inp_arc 
         SET the_geom = ST_Reverse(the_geom) 
         FROM rpt_arc 
-        WHERE rpt_arc.arc_id::text = rpt_inp_arc.arc_id 
+        WHERE rpt_arc.arc_id = rpt_inp_arc.arc_id
+        AND rpt_arc.result_id = rpt_inp_arc.result_id
         AND rpt_arc.flow < 0 
         AND rpt_inp_arc.result_id = %s
     """
