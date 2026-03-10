@@ -117,7 +117,9 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             _finalize_import(dao, result_id, giswater_version)
 
             # Commit all changes
-            dao.commit()
+            if not dao.commit():
+                tools_log.log_error(f"Failed to commit changes to database for result_id: {result_id}")
+                return False
             tools_log.log_info(f"Export to database completed successfully for result_id: {result_id}")
             return True
 
