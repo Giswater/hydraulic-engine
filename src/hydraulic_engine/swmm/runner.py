@@ -331,7 +331,6 @@ class SwmmRunner:
             max_workers: int = 4,
             crs_from: int = 25831,
             crs_to: int = 4326,
-            start_time: Optional[datetime] = None,
             client: Optional[HeFrostClient] = None,
         ) -> bool:
         """
