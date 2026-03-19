@@ -87,7 +87,7 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             # Step 1: Clean previous results for this result_id
             tools_log.log_info("Cleaning previous results...")
             if not _clean_previous_results(dao, result_id, giswater_version):
-                return False
+                raise Exception("Failed to clean previous results")
 
             # Step 2: Insert time series data into rpt_node
             tools_log.log_info("Inserting node results...")
@@ -119,7 +119,7 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             # Commit all changes
             if not dao.commit():
                 tools_log.log_error(f"Failed to commit changes to database for result_id: {result_id}")
-                return False
+                raise Exception("Failed to commit changes to database")
             tools_log.log_info(f"Export to database completed successfully for result_id: {result_id}")
             return True
 
@@ -314,24 +314,20 @@ def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, resu
     count = 0
 
     # Get unit system
-    try:
-        unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
-        if unit_system is None:
-            tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
-            return 0
-    except Exception as e:
-        tools_log.log_error(f"Error getting unit system: {e}")
-        return 0
+    unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
+    if unit_system is None:
+        tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
+        raise Exception(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
 
     # Get available node result types
     node_data = results.node
     if node_data is None:
-        return 0
+        raise Exception("No node data found in results")
 
     # Get all node IDs from demand (always present)
     if 'demand' not in node_data:
         tools_log.log_warning("No demand data found in results")
-        return 0
+        raise Exception("No demand data found in results")
 
     demand_df = node_data['demand']
     node_ids = demand_df.columns.tolist()
@@ -378,13 +374,9 @@ def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, resu
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
 
-    try:
-        if dao.cursor:
-            dao.cursor.executemany(sql, records)
-            count = len(records)
-    except Exception as e:
-        tools_log.log_error(f"Error inserting node results: {e}")
-        return 0
+    if dao.cursor:
+        dao.cursor.executemany(sql, records)
+        count = len(records)
 
     return count
 
@@ -403,24 +395,20 @@ def _insert_arc_results(dao: HePgDao, results: wntr.sim.SimulationResults, resul
     count = 0
 
     # Get unit system
-    try:
-        unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
-        if unit_system is None:
-            tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
-            return 0
-    except Exception as e:
-        tools_log.log_error(f"Error getting unit system: {e}")
-        return 0
+    unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
+    if unit_system is None:
+        tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
+        raise Exception(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
 
     # Get available link result types
     link_data = results.link
     if link_data is None:
-        return 0
+        raise Exception("No link data found in results")
 
     # Get all link IDs from flowrate (always present)
     if 'flowrate' not in link_data:
         tools_log.log_warning("No flowrate data found in results")
-        return 0
+        raise Exception("No flowrate data found in results")
 
     flow_df = link_data['flowrate']
     link_ids = flow_df.columns.tolist()
@@ -480,13 +468,9 @@ def _insert_arc_results(dao: HePgDao, results: wntr.sim.SimulationResults, resul
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
-    try:
-        if dao.cursor:
-            dao.cursor.executemany(sql, records)
-            count = len(records)
-    except Exception as e:
-        tools_log.log_error(f"Error inserting arc results: {e}")
-        return 0
+    if dao.cursor:
+        dao.cursor.executemany(sql, records)
+        count = len(records)
 
     return count
 
