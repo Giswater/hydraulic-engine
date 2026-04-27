@@ -200,7 +200,7 @@ def get_entity_id(url: str) -> str:
     :param url: Entity URL (e.g., "http://localhost/Things(1)")
     :return: Entity ID
     """
-    return url.split('(')[-1].strip(')')
+    return url.split('(')[-1].strip(')').replace("'", "")
 
 
 def geometry_changed(old_location: Dict, new_location: Dict) -> bool:
