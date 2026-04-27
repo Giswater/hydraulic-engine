@@ -29,6 +29,7 @@ from .models import (
     EpanetOtherSettings,
 )
 from ..utils import tools_log
+from ..exceptions import FileWriteError
 
 
 # Configuration for feature types mapping to WNTR methods
@@ -84,7 +85,7 @@ class EpanetInpHandler(EpanetFileHandler):
         """
         if self.file_object is None:
             self.error_msg = "No INP file loaded"
-            return False
+            raise FileWriteError(self.error_msg)
 
         try:
             path = output_path or self.file_path
@@ -94,7 +95,7 @@ class EpanetInpHandler(EpanetFileHandler):
         except Exception as e:
             self.error_msg = str(e)
             tools_log.log_error(f"Error writing INP file: {e}")
-            return False
+            raise FileWriteError(f"Error writing INP file '{output_path or self.file_path}': {e}") from e
 
     def validate_inp(self) -> Dict[str, Any]:
         """
