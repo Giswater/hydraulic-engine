@@ -19,6 +19,7 @@ from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
 from .inp_handler import SwmmInpHandler
 from ..utils import tools_log
 from ..utils.tools_api import HeFrostClient
+from ..exceptions import HydraulicEngineError
 
 
 @dataclass
@@ -128,10 +129,12 @@ class SwmmRunner:
         result = SwmmRunResult()
 
         self.inp = SwmmInpHandler()
-        if not self.inp.load_file(self.inp_path):
+        try:
+            self.inp.load_file(self.inp_path)
+        except HydraulicEngineError as e:
             result.status = RunStatus.ERROR
-            result.errors.append(f"Failed to load INP file: {self.inp_path}")
-            tools_log.log_error(f"Failed to load INP file: {self.inp_path}")
+            result.errors.append(str(e))
+            tools_log.log_error(f"Failed to load INP file: {e}")
             return result
 
         validation = self.inp.validate_inp()

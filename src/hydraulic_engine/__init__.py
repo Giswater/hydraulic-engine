@@ -18,6 +18,12 @@ __email__ = "info@bgeo.es"
 from .config import config
 from . import swmm
 from . import epanet
+from .exceptions import (
+    HydraulicEngineError,
+    FileLoadError,
+    FileWriteError,
+    UnsupportedFileTypeError,
+)
 from .utils import (
     ExportDataSource,
     create_pg_connection,
@@ -37,6 +43,10 @@ __all__ = [
     "config",
     "swmm",
     "epanet",
+    "HydraulicEngineError",
+    "FileLoadError",
+    "FileWriteError",
+    "UnsupportedFileTypeError",
     "ExportDataSource",
     "create_pg_connection",
     "create_gpkg_connection",

@@ -20,6 +20,7 @@ from .bin_handler import EpanetBinHandler
 from .inp_handler import EpanetInpHandler
 from .models import EpanetFeatureSettings, EpanetOptionsSettings, EpanetOtherSettings
 from ..utils.tools_api import HeFrostClient
+from ..exceptions import HydraulicEngineError
 
 
 @dataclass
@@ -128,10 +129,12 @@ class EpanetRunner:
         result = EpanetRunResult()
 
         self.inp = EpanetInpHandler()
-        if not self.inp.load_file(self.inp_path):
+        try:
+            self.inp.load_file(self.inp_path)
+        except HydraulicEngineError as e:
             result.status = RunStatus.ERROR
-            result.errors.append(f"Failed to load INP file: {self.inp_path}")
-            tools_log.log_error(f"Failed to load INP file: {self.inp_path}")
+            result.errors.append(str(e))
+            tools_log.log_error(f"Failed to load INP file: {e}")
             return result
 
         validation = self.inp.validate_inp()

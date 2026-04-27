@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from ..utils import tools_log
+from ..exceptions import FileLoadError, UnsupportedFileTypeError
 
 
 class EpanetFileHandler:
@@ -40,7 +41,7 @@ class EpanetFileHandler:
         if not os.path.isfile(file_path):
             self.error_msg = f"File not found: {file_path}"
             tools_log.log_error(self.error_msg)
-            return False
+            raise FileLoadError(self.error_msg)
 
         try:
             self.file_path = file_path
@@ -48,15 +49,16 @@ class EpanetFileHandler:
                 try:
                     bin_file = BinFile()
                     bin_file.read(file_path)
-                except:
-                    self.error_msg = f"Error reading {file_path}"
+                except Exception as e:
+                    self.error_msg = f"Error reading {file_path}: {e}"
                     tools_log.log_error(self.error_msg)
+                    raise FileLoadError(self.error_msg) from e
                 if bin_file.results is not None:
                     self.file_object = bin_file.results
                 else:
                     self.error_msg = f"No results found in {file_path}"
                     tools_log.log_error(self.error_msg)
-                    return False
+                    raise FileLoadError(self.error_msg)
             elif file_path.endswith(".rpt"):
                 pass
             elif file_path.endswith(".inp"):
@@ -64,14 +66,16 @@ class EpanetFileHandler:
             else:
                 self.error_msg = f"Unsupported file type: {file_path}"
                 tools_log.log_error(self.error_msg)
-                return False
+                raise UnsupportedFileTypeError(self.error_msg)
             tools_log.log_info(f"Successfully read file: {file_path}")
             return True
 
+        except (FileLoadError, UnsupportedFileTypeError):
+            raise
         except Exception as e:
             self.error_msg = str(e)
             tools_log.log_error(f"Error reading file: {e}")
-            return False
+            raise FileLoadError(f"Error reading file '{file_path}': {e}") from e
 
     def is_loaded(self) -> bool:
         """Check if a file is loaded."""
