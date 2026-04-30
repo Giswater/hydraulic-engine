@@ -10,7 +10,7 @@ from importlib.metadata import version, PackageNotFoundError
 try:
     __version__ = version("hydraulic-engine")
 except PackageNotFoundError:
-    __version__ = "0.3.1"
+    __version__ = "0.3.2"
 
 __author__ = "BGEO"
 __email__ = "info@bgeo.es"
