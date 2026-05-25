@@ -20,7 +20,7 @@ from .bin_handler import EpanetBinHandler
 from .inp_handler import EpanetInpHandler
 from .models import EpanetFeatureSettings, EpanetOptionsSettings, EpanetOtherSettings
 from ..utils.tools_api import HeFrostClient
-from ..exceptions import HydraulicEngineError
+from ..exceptions import ValidationError, UnsupportedFileTypeError
 
 
 @dataclass
@@ -129,20 +129,15 @@ class EpanetRunner:
         result = EpanetRunResult()
 
         self.inp = EpanetInpHandler()
-        try:
-            self.inp.load_file(self.inp_path)
-        except HydraulicEngineError as e:
-            result.status = RunStatus.ERROR
-            result.errors.append(str(e))
-            tools_log.log_error(f"Failed to load INP file: {e}")
-            return result
+        self.inp.load_file(self.inp_path)
 
         validation = self.inp.validate_inp()
         if not validation["valid"]:
-            result.status = RunStatus.ERROR
-            result.errors.append(f"INP file validation failed: {self.inp_path}")
-            tools_log.log_error(f"INP file validation failed: {self.inp_path}")
-            return result
+            errors = validation.get("errors", [])
+            raise ValidationError(
+                f"INP file validation failed for '{self.inp_path}': "
+                + "; ".join(errors)
+            )
 
         self.bin = EpanetBinHandler()
 
@@ -155,20 +150,14 @@ class EpanetRunner:
 
         # Modify the INP file with the feature settings, options settings and other settings
         if feature_settings or options_settings or other_settings:
-            try:
-                self.inp.update_inp_from_settings(
-                    feature_settings=feature_settings,
-                    options_settings=options_settings,
-                    other_settings=other_settings,
-                )
-                temp_inp_path = self.inp.get_file_path(None, ".inp")
-                self.inp.write(output_path=temp_inp_path)
-                result.inp_path = str(temp_inp_path)
-            except Exception as e:
-                result.status = RunStatus.ERROR
-                result.errors.append(f"Failed to update INP file with settings: {e}")
-                tools_log.log_error(f"Failed to update INP file with settings: {e}")
-                return result
+            self.inp.update_inp_from_settings(
+                feature_settings=feature_settings,
+                options_settings=options_settings,
+                other_settings=other_settings,
+            )
+            temp_inp_path = self.inp.get_file_path(None, ".inp")
+            self.inp.write(output_path=temp_inp_path)
+            result.inp_path = str(temp_inp_path)
 
         self._report_progress(5, "Starting EPANET simulation...")
         tools_log.log_info(f"Running EPANET simulation: {self.inp_path}")
@@ -263,8 +252,8 @@ class EpanetRunner:
             if enData is not None:
                 try:
                     enData.ENclose()
-                except:
-                    pass
+                except Exception as e:
+                    tools_log.log_warning(f"Error closing EPANET engine: {e}")
 
         return result
 
@@ -389,7 +378,9 @@ class EpanetRunner:
                     result.warnings.append(line_stripped)
 
         except Exception as e:
-            tools_log.log_warning(f"Could not parse RPT file for status: {e}")
+            msg = f"Could not parse RPT file for status: {e}"
+            tools_log.log_warning(msg)
+            result.warnings.append(msg)
 
     def _format_simulation_time(self, seconds: int) -> str:
         """Format simulation time (in seconds) into days, hours, minutes format."""
@@ -432,3 +423,5 @@ class EpanetRunner:
                 start_time=start_time,
                 client=client
             )
+        else:
+            raise UnsupportedFileTypeError(f"Unsupported export target: {to}")

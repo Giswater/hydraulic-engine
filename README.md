@@ -44,15 +44,15 @@ pip install -e ".[dev]"
 ### Running a SWMM Simulation
 
 ```python
-import hydraulic_engine as he
+from hydraulic_engine.swmm import SwmmRunner
 
-# Create runner
-runner = he.SwmmRunner(inp_path="drainage_model.inp")
-
-# Run simulation
+runner = SwmmRunner(
+    inp_path="drainage_model.inp",
+    rpt_path="results.rpt",
+    out_path="results.out",
+)
 result = runner.run()
 
-# Check results
 if result.status.value == "success":
     print(f"Simulation completed in {result.duration_seconds:.2f}s")
     print(f"RPT file: {result.rpt_path}")
@@ -63,15 +63,15 @@ else:
 ### Running an EPANET Simulation
 
 ```python
-import hydraulic_engine as he
+from hydraulic_engine.epanet import EpanetRunner
 
-# Create runner
-runner = he.EpanetRunner(inp_path="water_network.inp")
-
-# Run simulation
+runner = EpanetRunner(
+    inp_path="water_network.inp",
+    rpt_path="results.rpt",
+    bin_path="results.bin",
+)
 result = runner.run()
 
-# Check results
 if result.status.value == "success":
     print(f"Simulation completed in {result.duration_seconds:.2f}s")
 ```
@@ -79,66 +79,43 @@ if result.status.value == "success":
 ### Reading SWMM INP Files
 
 ```python
-import hydraulic_engine as he
+from hydraulic_engine.swmm import SwmmInpHandler
 
-# Create handler
-handler = he.SwmmInpHandler()
+handler = SwmmInpHandler()
+handler.load_file("model.inp")
 
-# Read INP file
-if handler.read("model.inp"):
-    # Get model summary
-    summary = handler.get_summary()
-    print(f"Junctions: {summary['counts']['junctions']}")
-    print(f"Conduits: {summary['counts']['conduits']}")
+summary = handler.get_summary()
+print(f"Junctions: {summary['counts']['junctions']}")
+print(f"Conduits: {summary['counts']['conduits']}")
 
-    # Get specific sections
-    junctions = handler.get_junctions()
-    conduits = handler.get_conduits()
+junctions = handler.get_junctions()
+conduits = handler.get_conduits()
 
-    # Modify and save
-    handler.write("modified_model.inp")
+handler.write("modified_model.inp")
 ```
 
 ### Reading SWMM Results
 
 ```python
-import hydraulic_engine as he
+from hydraulic_engine.swmm import SwmmRptHandler
 
-# Create handler
-handler = he.SwmmRptHandler()
+handler = SwmmRptHandler()
+handler.load_file("results.rpt")
 
-# Read RPT file
-if handler.load_result("results.rpt"):
-    # Get results
-    node_depths = handler.get_node_depth_summary()
-    link_flows = handler.get_link_flow_summary()
-```
-
-### Validating INP Files
-
-```python
-import hydraulic_engine as he
-
-# Validate without running
-runner = he.SwmmRunner()
-validation = runner.validate_inp("model.inp")
-
-if validation["valid"]:
-    print(f"Model info: {validation['info']}")
-else:
-    print(f"Validation errors: {validation['errors']}")
+node_depths = handler.get_node_depth_summary()
+link_flows = handler.get_link_flow_summary()
 ```
 
 ### Progress Tracking
 
 ```python
-import hydraulic_engine as he
+from hydraulic_engine.swmm import SwmmRunner
 
 def on_progress(progress: int, message: str):
     print(f"[{progress}%] {message}")
 
-runner = he.SwmmRunner(progress_callback=on_progress)
-result = runner.run("model.inp")
+runner = SwmmRunner(inp_path="model.inp", progress_callback=on_progress)
+result = runner.run()
 ```
 
 ## Database Connection
@@ -150,20 +127,17 @@ The package supports database connections for storing/retrieving model data.
 ```python
 import hydraulic_engine as he
 
-# Create connection (becomes the default)
 conn = he.create_pg_connection(
     host="localhost",
     port=5432,
     dbname="hydraulic_db",
     user="user",
     password="pass",
-    schema="my_schema"
+    schema="my_schema",
 )
 
-# Use connection
 rows = conn.get_rows("SELECT * FROM nodes")
 
-# Close when done
 he.close_connection()
 ```
 
@@ -172,13 +146,10 @@ he.close_connection()
 ```python
 import hydraulic_engine as he
 
-# Create connection
 conn = he.create_gpkg_connection("project.gpkg")
 
-# Query data
 rows = conn.get_rows("SELECT * FROM conduits")
 
-# Close when done
 he.close_connection()
 ```
 
@@ -188,25 +159,30 @@ he.close_connection()
 hydraulic-engine/
 ├── src/
 │   └── hydraulic_engine/
-│       ├── __init__.py│
+│       ├── __init__.py
+│       ├── exceptions.py
 │       ├── config/
-│       │   ├── config.py
-│       ├── core/
-│       │   ├── swmm/                    # SWMM-specific functionality
-│       │   │   ├── runner.py            # Run SWMM simulations
-│       │   │   ├── inp_handler.py       # Parse/write SWMM INP files
-│       │   │   └── rpt_handler.py       # Parse SWMM RPT files
-|       |   |   └── out_handler.py       # Parse SWMM OUT files
-│       │   ├── epanet/                  # EPANET-specific functionality
-│       │   │   ├── runner.py            # Run EPANET simulations
-│       │   │   ├── inp_handler.py       # Parse/write EPANET INP files
-│       │   │   └── bin_handler.py       # Parse EPANET BINARY files
-│       │   └── utils/                   # Shared utilities
-│       │       ├── tools_log.py
-│       │       ├── tools_db.py
-│       │       └── tools_api.py
-│       │       └── tools_config.py
-│       │       └── tools_sensorthings.py
+│       │   └── config.py
+│       ├── epanet/
+│       │   ├── runner.py            # Run EPANET simulations
+│       │   ├── inp_handler.py       # Parse/write EPANET INP files
+│       │   ├── bin_handler.py       # Parse EPANET binary result files
+│       │   ├── file_handler.py
+│       │   └── models.py
+│       ├── swmm/
+│       │   ├── runner.py            # Run SWMM simulations
+│       │   ├── inp_handler.py       # Parse/write SWMM INP files
+│       │   ├── rpt_handler.py       # Parse SWMM RPT files
+│       │   ├── out_handler.py       # Parse SWMM OUT files
+│       │   ├── file_handler.py
+│       │   └── models.py
+│       └── utils/
+│           ├── tools_log.py
+│           ├── tools_db.py
+│           ├── tools_api.py
+│           ├── tools_os.py
+│           ├── tools_config.py
+│           └── tools_sensorthings.py
 ├── tests/
 ├── pyproject.toml
 └── README.md
@@ -245,9 +221,11 @@ hydraulic-engine/
 
 - Python >= 3.9
 - pyswmm >= 2.0.0 (SWMM simulation engine)
-- swmm-api >= 0.4.60 (INP/RPT file parsing)
-- wntr >= 1.0.0 (EPANET simulations)
+- swmm-api >= 0.4.31 (INP/RPT file parsing)
+- wntr >= 1.2.0 (EPANET simulations)
 - psycopg[binary] >= 3.1.0
+- requests >= 2.28.0
+- pyproj >= 3.6.0
 
 ## Development
 

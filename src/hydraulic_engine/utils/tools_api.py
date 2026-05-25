@@ -14,6 +14,7 @@ import threading
 import time
 import requests
 
+from ..exceptions import APIError
 from . import tools_log
 
 
@@ -151,7 +152,12 @@ class HeFrostClient(HeApiClient):
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"FROST-Server connection error: {e}")
-            return False
+            raise APIError(f"FROST-Server connection error: {e}") from e
+
+    def _ensure_connected(self) -> None:
+        """Raise APIError if the client is not configured."""
+        if not self.is_connected():
+            raise APIError("FROST client is not connected")
 
     def _get_headers(self) -> Dict[str, str]:
         """Get request headers, including auth if configured."""
@@ -175,6 +181,7 @@ class HeFrostClient(HeApiClient):
     # HTTP Methods
     def get(self, endpoint: str) -> requests.Response:
         """Send GET request to endpoint."""
+        self._ensure_connected()
         url = f'{self.base_url}{endpoint}' if not endpoint.startswith('http') else endpoint
         response = self.session.get(url, headers=self._get_headers())
         response.raise_for_status()
@@ -182,6 +189,7 @@ class HeFrostClient(HeApiClient):
 
     def post(self, endpoint: str, data: Dict) -> requests.Response:
         """Send POST request to endpoint."""
+        self._ensure_connected()
         url = f'{self.base_url}{endpoint}'
         response = self.session.post(url, json=data, headers=self._get_headers())
         response.raise_for_status()
@@ -189,6 +197,7 @@ class HeFrostClient(HeApiClient):
 
     def patch(self, endpoint: str, data: Dict) -> requests.Response:
         """Send PATCH request to endpoint."""
+        self._ensure_connected()
         url = f'{self.base_url}{endpoint}'
         response = self.session.patch(url, json=data, headers=self._get_headers())
         response.raise_for_status()
@@ -196,44 +205,54 @@ class HeFrostClient(HeApiClient):
 
     def delete(self, endpoint: str) -> requests.Response:
         """Send DELETE request to endpoint."""
+        self._ensure_connected()
         url = f'{self.base_url}{endpoint}'
         response = self.session.delete(url, headers=self._get_headers())
         response.raise_for_status()
         return response
 
     # Core CRUD operations
-    def create_entity(self, entity_type: str, data: Dict) -> Optional[str]:
+    def create_entity(self, entity_type: str, data: Dict) -> str:
         """Create an entity and return its URL."""
         try:
             response = self.post(entity_type, data)
-            return response.headers.get('Location')
+            location = response.headers.get('Location')
+            if not location:
+                raise APIError(f"No Location header returned when creating {entity_type}")
+            return location
+        except APIError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Error creating {entity_type}: {e}")
-            return None
+            raise APIError(f"Error creating {entity_type}: {e}") from e
 
     def update_entity(self, entity_type: str, entity_id: str, data: Dict) -> bool:
         """Update an entity using PATCH."""
         try:
             self.patch(f'{entity_type}({entity_id})', data)
             return True
+        except APIError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Error updating {entity_type}({entity_id}): {e}")
-            return False
+            raise APIError(f"Error updating {entity_type}({entity_id}): {e}") from e
 
     def delete_entity(self, entity_type: str, entity_id: str) -> bool:
         """Delete an entity."""
         try:
             self.delete(f'{entity_type}({entity_id})')
             return True
+        except APIError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Error deleting {entity_type}({entity_id}): {e}")
-            return False
+            raise APIError(f"Error deleting {entity_type}({entity_id}): {e}") from e
 
     def get_entities(self, entity_type: str, expand: Optional[str] = None,
-                     top: int = 1000) -> Optional[List[Dict]]:
+                     top: int = 1000) -> List[Dict]:
         """Get all entities with pagination support."""
         try:
             entities = []
@@ -258,10 +277,12 @@ class HeFrostClient(HeApiClient):
 
             return entities
 
+        except APIError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Error getting {entity_type}: {e}")
-            return None
+            raise APIError(f"Error getting {entity_type}: {e}") from e
 
     def _send_single_batch(self, batch: List[Dict], batch_num: int) -> Tuple[int, List[Dict], float]:
         """
@@ -277,7 +298,7 @@ class HeFrostClient(HeApiClient):
         return batch_num, responses, elapsed
 
     def batch_request(self, batch_requests: List[Dict],
-                      batch_size: int = 50, max_workers: int = 4) -> Optional[List[Dict]]:
+                      batch_size: int = 50, max_workers: int = 4) -> List[Dict]:
         """
         Send multiple operations in a single HTTP request using FROST-Server's JSON Batch Request.
         Splits into multiple batches and sends them concurrently for better performance.
@@ -350,12 +371,19 @@ class HeFrostClient(HeApiClient):
                 f"{total_time:.2f}s ({ops_per_sec:.1f} ops/sec)"
             )
 
+            if total_failed > 0:
+                raise APIError(
+                    f"Batch request completed with {total_failed} failed operations "
+                    f"out of {total_requests}"
+                )
             return all_responses
 
+        except APIError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Batch request error: {e}")
-            return None
+            raise APIError(f"Batch request error: {e}") from e
 
 
 # Global API client management
@@ -382,18 +410,17 @@ def create_frost_connection(
     from ..config import config
 
     client = HeFrostClient()
-    if client.connect(
+    client.connect(
         base_url,
         keycloak_url=keycloak_url,
         keycloak_realm=keycloak_realm,
         keycloak_client_id=keycloak_client_id,
         keycloak_client_secret=keycloak_client_secret,
         **kwargs
-    ):
-        if set_as_default:
-            config.session_vars['api_client'] = client
-        return client
-    return None
+    )
+    if set_as_default:
+        config.session_vars['api_client'] = client
+    return client
 
 
 def get_api_client() -> Optional[HeApiClient]:

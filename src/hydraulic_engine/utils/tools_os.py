@@ -11,6 +11,8 @@ import platform
 from pathlib import Path
 from typing import Optional
 
+from ..exceptions import FileWriteError
+
 
 def get_datadir() -> str:
     """
@@ -73,13 +75,14 @@ def ensure_dir(path: str) -> bool:
     Ensure that a directory exists, creating it if necessary.
 
     :param path: Path to the directory
-    :return: True if directory exists or was created, False on error
+    :return: True if directory exists or was created
+    :raises FileWriteError: If the directory cannot be created
     """
     try:
         os.makedirs(path, exist_ok=True)
         return True
-    except OSError:
-        return False
+    except OSError as e:
+        raise FileWriteError(f"Could not create directory '{path}': {e}") from e
 
 
 def file_exists(path: str) -> bool:

@@ -7,6 +7,18 @@ or (at your option) any later version.
 EPANET module - Water distribution system modeling functionality.
 """
 # -*- coding: utf-8 -*-
+from ..exceptions import (
+    HydraulicEngineError,
+    FileLoadError,
+    FileWriteError,
+    UnsupportedFileTypeError,
+    ModelNotLoadedError,
+    ValidationError,
+    DatabaseError,
+    APIError,
+    ExportError,
+    SimulationError,
+)
 from .runner import EpanetRunner, EpanetRunResult
 from .inp_handler import EpanetInpHandler
 from .bin_handler import EpanetBinHandler
@@ -56,6 +68,17 @@ from .models import (
 )
 
 __all__ = [
+    # Exceptions
+    "HydraulicEngineError",
+    "FileLoadError",
+    "FileWriteError",
+    "UnsupportedFileTypeError",
+    "ModelNotLoadedError",
+    "ValidationError",
+    "DatabaseError",
+    "APIError",
+    "ExportError",
+    "SimulationError",
     # Handlers and Runner
     "EpanetRunner",
     "EpanetRunResult",

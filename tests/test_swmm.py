@@ -7,78 +7,48 @@ or (at your option) any later version.
 SWMM module tests.
 """
 # -*- coding: utf-8 -*-
-import os
 import pytest
+
+from hydraulic_engine import FileLoadError, ModelNotLoadedError
+from hydraulic_engine.swmm import SwmmRunner, SwmmInpHandler, SwmmRptHandler, SwmmOutHandler
+from hydraulic_engine.utils.enums import RunStatus
 
 
 class TestSwmmImports:
     """Test SWMM module imports."""
 
     def test_import_from_package(self):
-        """Test importing SWMM classes from main package."""
-        from hydraulic_engine import SwmmRunner, SwmmInpHandler, SwmmRptHandler
+        from hydraulic_engine import swmm
         assert SwmmRunner is not None
-        assert SwmmInpHandler is not None
-        assert SwmmRptHandler is not None
-
-    def test_import_from_core(self):
-        """Test importing from core.swmm."""
-        from hydraulic_engine.core.swmm import SwmmRunner, SwmmInpHandler, SwmmRptHandler
-        assert SwmmRunner is not None
-        assert SwmmInpHandler is not None
-        assert SwmmRptHandler is not None
+        assert swmm.SwmmInpHandler is not None
+        assert swmm.SwmmRptHandler is not None
 
     def test_import_result_classes(self):
-        """Test importing result dataclasses."""
-        from hydraulic_engine.core.swmm.runner import SwmmRunResult, SwmmRunStatus
+        from hydraulic_engine.swmm.runner import SwmmRunResult
         assert SwmmRunResult is not None
-        assert SwmmRunStatus is not None
 
 
 class TestSwmmRunner:
     """Test SwmmRunner class."""
 
     def test_runner_initialization(self):
-        """Test SwmmRunner can be initialized."""
-        from hydraulic_engine import SwmmRunner
-        runner = SwmmRunner()
+        runner = SwmmRunner(inp_path="model.inp")
         assert runner is not None
 
-    def test_run_missing_file(self):
-        """Test running with missing INP file."""
-        from hydraulic_engine import SwmmRunner
-        from hydraulic_engine.core.swmm.runner import SwmmRunStatus
-        
-        runner = SwmmRunner()
-        result = runner.run("nonexistent.inp")
-        
-        assert result.status == SwmmRunStatus.ERROR
-        assert len(result.errors) > 0
-        assert "not found" in result.errors[0].lower()
-
-    def test_validate_missing_file(self):
-        """Test validating missing INP file."""
-        from hydraulic_engine import SwmmRunner
-        
-        runner = SwmmRunner()
-        validation = runner.validate_inp("nonexistent.inp")
-        
-        assert validation["valid"] is False
-        assert len(validation["errors"]) > 0
+    def test_run_missing_file_raises(self):
+        runner = SwmmRunner(inp_path="nonexistent.inp")
+        with pytest.raises(FileLoadError):
+            runner.run()
 
     def test_progress_callback(self):
-        """Test progress callback functionality."""
-        from hydraulic_engine import SwmmRunner
-        
         progress_calls = []
-        
+
         def callback(progress, message):
             progress_calls.append((progress, message))
-        
-        runner = SwmmRunner()
-        runner.set_progress_callback(callback)
+
+        runner = SwmmRunner(progress_callback=callback)
         runner._report_progress(50, "Test message")
-        
+
         assert len(progress_calls) == 1
         assert progress_calls[0] == (50, "Test message")
 
@@ -87,30 +57,25 @@ class TestSwmmInpHandler:
     """Test SwmmInpHandler class."""
 
     def test_handler_initialization(self):
-        """Test SwmmInpHandler can be initialized."""
-        from hydraulic_engine import SwmmInpHandler
         handler = SwmmInpHandler()
         assert handler is not None
-        assert handler.inp_path is None
-        assert handler.inp is None
+        assert handler.file_path is None
 
     def test_is_loaded_false(self):
-        """Test is_loaded returns False when no file loaded."""
-        from hydraulic_engine import SwmmInpHandler
         handler = SwmmInpHandler()
         assert handler.is_loaded() is False
 
-    def test_read_missing_file(self):
-        """Test reading missing file."""
-        from hydraulic_engine import SwmmInpHandler
+    def test_load_missing_file_raises(self):
         handler = SwmmInpHandler()
-        result = handler.read("nonexistent.inp")
-        assert result is False
-        assert handler.error_msg is not None
+        with pytest.raises(FileLoadError):
+            handler.load_file("nonexistent.inp")
 
-    def test_get_summary_not_loaded(self):
-        """Test get_summary when no file loaded."""
-        from hydraulic_engine import SwmmInpHandler
+    def test_get_junctions_without_load_raises(self):
+        handler = SwmmInpHandler()
+        with pytest.raises(ModelNotLoadedError):
+            handler.get_junctions()
+
+    def test_get_summary_not_loaded_empty_counts(self):
         handler = SwmmInpHandler()
         summary = handler.get_summary()
         assert summary["loaded"] is False
@@ -120,52 +85,33 @@ class TestSwmmRptHandler:
     """Test SwmmRptHandler class."""
 
     def test_handler_initialization(self):
-        """Test SwmmRptHandler can be initialized."""
-        from hydraulic_engine import SwmmRptHandler
         handler = SwmmRptHandler()
         assert handler is not None
-        assert handler.rpt_path is None
 
     def test_is_loaded_false(self):
-        """Test is_loaded returns False when no file loaded."""
-        from hydraulic_engine import SwmmRptHandler
         handler = SwmmRptHandler()
         assert handler.is_loaded() is False
 
-    def test_read_missing_file(self):
-        """Test reading missing file."""
-        from hydraulic_engine import SwmmRptHandler
+    def test_load_missing_file_raises(self):
         handler = SwmmRptHandler()
-        result = handler.read("nonexistent.rpt")
-        assert result is False
-        assert handler.error_msg is not None
+        with pytest.raises(FileLoadError):
+            handler.load_file("nonexistent.rpt")
 
-    def test_get_summary_not_loaded(self):
-        """Test get_summary when no file loaded."""
-        from hydraulic_engine import SwmmRptHandler
+    def test_get_errors_without_load_raises(self):
         handler = SwmmRptHandler()
-        summary = handler.get_summary()
-        assert summary["loaded"] is False
+        with pytest.raises(ModelNotLoadedError):
+            handler.get_errors()
+
+    def test_export_not_implemented(self):
+        handler = SwmmRptHandler()
+        with pytest.raises(NotImplementedError):
+            handler.export_to_database()
 
 
-class TestSwmmIntegration:
-    """Integration tests for SWMM module (require swmm-api)."""
+class TestSwmmOutHandler:
+    """Test SwmmOutHandler class."""
 
-    @pytest.mark.skip(reason="Requires actual INP file")
-    def test_full_workflow(self, tmp_path):
-        """Test complete SWMM workflow."""
-        from hydraulic_engine import SwmmRunner, SwmmInpHandler, SwmmRptHandler
-        
-        # Read INP
-        inp_handler = SwmmInpHandler()
-        inp_handler.read("sample.inp")
-        
-        # Run simulation
-        runner = SwmmRunner()
-        result = runner.run("sample.inp", rpt_path=str(tmp_path / "result.rpt"))
-        
-        # Read results
-        rpt_handler = SwmmRptHandler()
-        rpt_handler.read(result.rpt_path)
-        
-        assert result.status.value in ("success", "warning")
+    def test_export_database_not_implemented(self):
+        handler = SwmmOutHandler()
+        with pytest.raises(NotImplementedError):
+            handler.export_to_database()

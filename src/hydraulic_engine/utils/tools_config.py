@@ -9,6 +9,8 @@ import configparser
 
 from typing import Any, Optional
 
+_NOT_IMPLEMENTED_MSG = "tools_config is not implemented yet"
+
 
 def load_config(config_name: str, config_path: Optional[str] = None) -> Optional[configparser.ConfigParser]:
     """
@@ -18,8 +20,7 @@ def load_config(config_name: str, config_path: Optional[str] = None) -> Optional
     :param config_path: Optional path to config file. If None, uses default paths.
     :return: ConfigParser instance or None
     """
-    # TODO: Implement config loading logic
-    pass
+    raise NotImplementedError(_NOT_IMPLEMENTED_MSG)
 
 
 def get_config_value(config_name: str, section: str, option: str, fallback: Any = None) -> Any:
@@ -32,8 +33,7 @@ def get_config_value(config_name: str, section: str, option: str, fallback: Any 
     :param fallback: Fallback value if not found
     :return: Configuration value
     """
-    # TODO: Implement get value logic
-    pass
+    raise NotImplementedError(_NOT_IMPLEMENTED_MSG)
 
 
 def set_config_value(config_name: str, section: str, option: str, value: Any) -> bool:
@@ -46,8 +46,7 @@ def set_config_value(config_name: str, section: str, option: str, value: Any) ->
     :param value: Value to set
     :return: True if successful
     """
-    # TODO: Implement set value logic
-    pass
+    raise NotImplementedError(_NOT_IMPLEMENTED_MSG)
 
 
 def save_config(config_name: str) -> bool:
@@ -57,8 +56,7 @@ def save_config(config_name: str) -> bool:
     :param config_name: Name of the config
     :return: True if successful
     """
-    # TODO: Implement save logic
-    pass
+    raise NotImplementedError(_NOT_IMPLEMENTED_MSG)
 
 
 def init_configs() -> bool:
@@ -67,5 +65,4 @@ def init_configs() -> bool:
 
     :return: True if all configs loaded successfully
     """
-    # TODO: Implement init configs logic
-    pass
+    raise NotImplementedError(_NOT_IMPLEMENTED_MSG)

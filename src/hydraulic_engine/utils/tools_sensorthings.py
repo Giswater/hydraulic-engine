@@ -15,8 +15,18 @@ import os
 from typing import Dict, List, Optional, Tuple, Literal
 from swmm_api.input_file import SwmmInput
 
+from ..exceptions import APIError
 from .tools_api import get_api_client, HeFrostClient
 from . import tools_log
+
+
+def _require_frost_client(client: Optional[HeFrostClient] = None) -> HeFrostClient:
+    """Return a connected FROST client or raise APIError."""
+    if client is None:
+        client = get_api_client()
+    if not client or not isinstance(client, HeFrostClient):
+        raise APIError("No FROST client available")
+    return client
 
 
 # region SWMM
@@ -177,6 +187,7 @@ def get_node_properties(engine: Literal['swmm', 'epanet']) -> List[str]:
         return SWMM_NODE_PROPERTIES
     elif engine == 'epanet':
         return EPANET_NODE_PROPERTIES
+    raise ValueError(f"Unsupported engine: {engine}")
 
 
 def get_link_properties(engine: Literal['swmm', 'epanet']) -> List[str]:
@@ -184,6 +195,7 @@ def get_link_properties(engine: Literal['swmm', 'epanet']) -> List[str]:
         return SWMM_LINK_PROPERTIES
     elif engine == 'epanet':
         return EPANET_LINK_PROPERTIES
+    raise ValueError(f"Unsupported engine: {engine}")
 
 
 def get_observed_property_config(prop_key: str, engine: Literal['swmm', 'epanet']) -> Dict:
@@ -191,6 +203,7 @@ def get_observed_property_config(prop_key: str, engine: Literal['swmm', 'epanet'
         return SWMM_OBSERVED_PROPERTIES[prop_key]
     elif engine == 'epanet':
         return EPANET_OBSERVED_PROPERTIES[prop_key]
+    raise ValueError(f"Unsupported engine: {engine}")
 
 
 def get_entity_id(url: str) -> str:
@@ -223,7 +236,7 @@ def create_thing_with_location(
     location_data: Dict,
     properties: Optional[Dict] = None,
     client: Optional[HeFrostClient] = None
-) -> Optional[str]:
+) -> str:
     """
     Create a Thing with its Location using deep insert.
     
@@ -232,14 +245,9 @@ def create_thing_with_location(
     :param location_data: GeoJSON location
     :param properties: Additional properties
     :param client: FROST client (uses default if None)
-    :return: Thing URL or None
+    :return: Thing URL
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return None
+    client = _require_frost_client(client)
 
     thing_data = {
         "name": name,
@@ -261,7 +269,7 @@ def create_sensor(
     description: str,
     properties: Optional[Dict] = None,
     client: Optional[HeFrostClient] = None
-) -> Optional[str]:
+) -> str:
     """
     Create a Sensor.
     
@@ -269,14 +277,9 @@ def create_sensor(
     :param description: Sensor description
     :param properties: Additional properties
     :param client: FROST client (uses default if None)
-    :return: Sensor URL or None
+    :return: Sensor URL
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return None
+    client = _require_frost_client(client)
 
     sensor_data = {
         "name": name,
@@ -294,7 +297,7 @@ def create_observed_property(
     description: str,
     unit: str,
     client: Optional[HeFrostClient] = None
-) -> Optional[str]:
+) -> str:
     """
     Create an ObservedProperty.
     
@@ -302,14 +305,9 @@ def create_observed_property(
     :param description: Property description
     :param unit: Unit of measurement
     :param client: FROST client (uses default if None)
-    :return: ObservedProperty URL or None
+    :return: ObservedProperty URL
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return None
+    client = _require_frost_client(client)
 
     property_data = {
         "name": name,
@@ -329,7 +327,7 @@ def create_datastream(
     property_id: str,
     observations: Optional[List[Dict]] = None,
     client: Optional[HeFrostClient] = None
-) -> Optional[str]:
+) -> str:
     """
     Create a Datastream with optional Observations.
     
@@ -341,14 +339,9 @@ def create_datastream(
     :param property_id: ObservedProperty ID
     :param observations: List of observations to create with datastream
     :param client: FROST client (uses default if None)
-    :return: Datastream URL or None
+    :return: Datastream URL
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return None
+    client = _require_frost_client(client)
 
     datastream_data = {
         "name": name,
@@ -376,12 +369,7 @@ def get_all_things_with_locations(
     :param client: FROST client (uses default if None)
     :return: Dict mapping Thing name to Thing data
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return {}
+    client = _require_frost_client(client)
 
     things_cache = {}
     things = client.get_entities('Things', expand='Locations')
@@ -407,12 +395,7 @@ def get_all_observed_properties(
     :param client: FROST client (uses default if None)
     :return: Dict mapping property name to property ID
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return {}
+    client = _require_frost_client(client)
 
     obs_props_cache = {}
     properties = client.get_entities('ObservedProperties')
@@ -515,12 +498,7 @@ def process_things_batch(
     :param client: FROST client (uses default if None)
     :return: True if successful
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return False
+    client = _require_frost_client(client)
 
     # Fetch cache if not provided
     if things_cache is None:
@@ -563,40 +541,17 @@ def process_things_batch(
     tools_log.log_info(f"  Batches: {num_batches} (batch_size={batch_size}, max_workers={max_workers})")
     tools_log.log_info("Sending batches...")
 
-    try:
-        send_start = time.time()
-        responses = client.batch_request(all_requests, batch_size, max_workers)
+    send_start = time.time()
+    client.batch_request(all_requests, batch_size, max_workers)
+    send_time = time.time() - send_start
 
-        if responses is None:
-            tools_log.log_error("Batch request failed")
-            return False
+    total_time = prep_time + send_time
+    ops_per_sec = len(all_requests) / send_time if send_time > 0 else 0
 
-        send_time = time.time() - send_start
-
-        # Count successes and failures
-        success_count = sum(1 for r in responses if 200 <= r.get('status', 0) < 300)
-        error_count = len(responses) - success_count
-
-        total_time = prep_time + send_time
-        ops_per_sec = len(all_requests) / send_time if send_time > 0 else 0
-
-        tools_log.log_info(f"Batch complete: {success_count} succeeded, {error_count} failed")
-        tools_log.log_info(f"  Send time: {send_time:.2f}s ({ops_per_sec:.1f} ops/sec)")
-        tools_log.log_info(f"  Total time: {total_time:.2f}s")
-
-        # Log errors if any (limit to first 10)
-        error_responses = [r for r in responses if r.get('status', 0) >= 400]
-        if error_responses:
-            tools_log.log_warning(f"  First {min(10, len(error_responses))} errors:")
-            for resp in error_responses[:10]:
-                error_msg = str(resp.get('body', ''))[:100]
-                tools_log.log_warning(f"    Request {resp.get('id')}: {resp.get('status')} - {error_msg}")
-
-        return error_count == 0
-
-    except Exception as e:
-        tools_log.log_error(f"Error in batch request: {e}")
-        return False
+    tools_log.log_info(f"Batch complete: {len(all_requests)} operations succeeded")
+    tools_log.log_info(f"  Send time: {send_time:.2f}s ({ops_per_sec:.1f} ops/sec)")
+    tools_log.log_info(f"  Total time: {total_time:.2f}s")
+    return True
 
 
 def mark_obsolete_things(
@@ -617,12 +572,7 @@ def mark_obsolete_things(
     :param client: FROST client (uses default if None)
     :return: True if successful
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return False
+    client = _require_frost_client(client)
 
     obsolete_things = []
     for thing_name, thing_data in things_cache.items():
@@ -645,20 +595,9 @@ def mark_obsolete_things(
             "body": {"properties": {**properties, "state": "obsolete"}}
         })
 
-    try:
-        responses = client.batch_request(batch_requests, batch_size, max_workers)
-
-        if responses is None:
-            tools_log.log_error("Batch request failed")
-            return False
-
-        success_count = sum(1 for r in responses if 200 <= r.get('status', 0) < 300)
-        tools_log.log_info(f"Marked {success_count} Things as obsolete")
-        return success_count == len(obsolete_things)
-
-    except Exception as e:
-        tools_log.log_error(f"Error marking Things as obsolete: {e}")
-        return False
+    client.batch_request(batch_requests, batch_size, max_workers)
+    tools_log.log_info(f"Marked {len(obsolete_things)} Things as obsolete")
+    return True
 
 
 def delete_all_entities(
@@ -674,18 +613,13 @@ def delete_all_entities(
     :param client: FROST client (uses default if None)
     :return: True if successful
     """
-    if client is None:
-        client = get_api_client()
-
-    if not client or not isinstance(client, HeFrostClient):
-        tools_log.log_error("No FROST client available")
-        return False
+    client = _require_frost_client(client)
 
     entities = ['Things', 'Locations', 'Sensors', 'ObservedProperties']
+    errors: List[str] = []
 
     for entity in entities:
         try:
-            # Get all entity IDs
             all_entities = client.get_entities(entity)
 
             if not all_entities:
@@ -694,7 +628,6 @@ def delete_all_entities(
 
             entity_ids = [item['@iot.id'] for item in all_entities]
 
-            # Build batch delete requests
             delete_requests = []
             for i, entity_id in enumerate(entity_ids):
                 delete_requests.append({
@@ -703,20 +636,17 @@ def delete_all_entities(
                     "url": f"{entity}({entity_id})"
                 })
 
-            # Send batch delete
             tools_log.log_info(f"Deleting {len(entity_ids)} {entity} using batch requests...")
-            responses = client.batch_request(delete_requests, batch_size, max_workers)
-
-            if responses is None:
-                tools_log.log_error(f"Failed to delete {entity}")
-                continue
-
-            success_count = sum(1 for r in responses if 200 <= r.get('status', 0) < 300)
-            tools_log.log_info(f"Completed deletion of {success_count}/{len(entity_ids)} {entity} entities")
+            client.batch_request(delete_requests, batch_size, max_workers)
+            tools_log.log_info(f"Completed deletion of {len(entity_ids)} {entity} entities")
 
         except Exception as e:
-            tools_log.log_error(f"Error processing {entity} entities: {e}")
-            return False
+            msg = f"Error processing {entity} entities: {e}"
+            tools_log.log_error(msg)
+            errors.append(msg)
+
+    if errors:
+        raise APIError("; ".join(errors))
 
     return True
 

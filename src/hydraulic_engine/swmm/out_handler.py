@@ -17,6 +17,7 @@ from .inp_handler import SwmmInpHandler
 from ..utils import tools_log
 from ..utils.tools_api import get_api_client, HeFrostClient
 from ..utils import tools_sensorthings
+from ..exceptions import ModelNotLoadedError, APIError, ExportError, ValidationError
 
 
 class SwmmOutHandler(SwmmFileHandler, SwmmResultHandler):
@@ -36,9 +37,7 @@ class SwmmOutHandler(SwmmFileHandler, SwmmResultHandler):
 
     def export_to_database(self) -> bool:
         """Export simulation results to database."""
-        # TODO: Implement export to database
-        tools_log.log_warning("Export to database not yet implemented")
-        return False
+        raise NotImplementedError("SWMM OUT export to database is not implemented")
 
 
 # region Export to FROST-Server
@@ -72,12 +71,10 @@ class SwmmOutHandler(SwmmFileHandler, SwmmResultHandler):
             client = get_api_client()
 
         if not client or not isinstance(client, HeFrostClient):
-            tools_log.log_error("No FROST client available")
-            return False
+            raise APIError("No FROST client available")
 
         if not self.is_loaded():
-            tools_log.log_error("No OUT file loaded")
-            return False
+            raise ModelNotLoadedError("No OUT file loaded")
 
         # Delete all existing entities. Note: This is only used for testing purposes.
         # if delete_all:
@@ -91,8 +88,7 @@ class SwmmOutHandler(SwmmFileHandler, SwmmResultHandler):
 
         # Check if INP file is loaded
         if not inp_handler.is_loaded():
-            tools_log.log_error("No INP file loaded")
-            return False
+            raise ModelNotLoadedError("No INP file loaded")
 
         # Pre-fetch existing entities (optimized: 2 API calls instead of N)
         tools_log.log_info("Fetching existing entities from server...")
@@ -193,6 +189,7 @@ def _prepare_nodes_things_data(
 ) -> List[Dict]:
     """Prepare Thing data for nodes (no HTTP calls)."""
     things_data = []
+    export_errors: List[str] = []
     for node_data in nodes_data:
         node_id = node_data['id']
         node_type = node_data['type']
@@ -234,7 +231,9 @@ def _prepare_nodes_things_data(
                 datastreams.append(datastream)
 
             except Exception as e:
-                tools_log.log_warning(f"Warning: Could not process {prop} for {node_id}: {e}")
+                msg = f"Could not process {prop} for {node_id}: {e}"
+                tools_log.log_warning(msg)
+                export_errors.append(msg)
 
         thing_data = {
             "name": node_id,
@@ -251,6 +250,11 @@ def _prepare_nodes_things_data(
             }
         }
         things_data.append(thing_data)
+
+    if export_errors:
+        raise ExportError(
+            "FROST export failed while preparing node Things: " + "; ".join(export_errors)
+        )
 
     return things_data
 
@@ -281,6 +285,7 @@ def _prepare_links_things_data(
 ) -> List[Dict]:
     """Prepare Thing data for links (no HTTP calls)."""
     things_data = []
+    export_errors: List[str] = []
     for link_data in links_data:
         link_id = link_data['id']
         link_type = link_data['type']
@@ -324,7 +329,9 @@ def _prepare_links_things_data(
                 datastreams.append(datastream)
 
             except Exception as e:
-                tools_log.log_warning(f"Warning: Could not process {prop} for {link_id}: {e}")
+                msg = f"Could not process {prop} for {link_id}: {e}"
+                tools_log.log_warning(msg)
+                export_errors.append(msg)
 
         thing_data = {
             "name": link_id,
@@ -345,6 +352,11 @@ def _prepare_links_things_data(
         }
         things_data.append(thing_data)
 
+    if export_errors:
+        raise ExportError(
+            "FROST export failed while preparing link Things: " + "; ".join(export_errors)
+        )
+
     return things_data
 
 
@@ -352,10 +364,14 @@ def _get_geometry_from_link(inp, link) -> list[tuple[float, float]]:
     """Get geometry coordinates for a link including vertices."""
     from_node = link.from_node
     if from_node not in inp[COORDINATES]:
-        return []
+        raise ValidationError(
+            f"Link {link.name} has invalid geometry: missing coordinates on node {from_node}"
+        )
     to_node = link.to_node
     if to_node not in inp[COORDINATES]:
-        return []
+        raise ValidationError(
+            f"Link {link.name} has invalid geometry: missing coordinates on node {to_node}"
+        )
 
     start_node_x, start_node_y = inp[COORDINATES][from_node].x, inp[COORDINATES][from_node].y
     end_node_x, end_node_y = inp[COORDINATES][to_node].x, inp[COORDINATES][to_node].y

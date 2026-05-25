@@ -6,9 +6,26 @@ or (at your option) any later version.
 """
 # -*- coding: utf-8 -*-
 
-from typing import Optional
+from typing import Optional, Any
 from enum import Enum
 from dataclasses import dataclass
+
+from ..exceptions import ValidationError
+
+
+def _validate_positive(value: Optional[float], field_name: str) -> None:
+    if value is not None and value <= 0:
+        raise ValidationError(f"{field_name} must be positive, got {value}")
+
+
+def _validate_coordinates(coords: Any) -> None:
+    if coords is None:
+        return
+    if not isinstance(coords, (tuple, list)) or len(coords) != 2:
+        raise ValidationError(f"coordinates must be a pair of numbers, got {coords!r}")
+    if not all(isinstance(c, (int, float)) for c in coords):
+        raise ValidationError(f"coordinates must be numeric, got {coords!r}")
+
 
 # region Base Classes
 
@@ -92,6 +109,9 @@ class EpanetNode(EpanetBaseObject):
 
     # WNTR: coordinates (x, y) | EPANET INP: [COORDINATES] section
     coordinates: Optional[tuple[float, float]] = None
+
+    def __post_init__(self) -> None:
+        _validate_coordinates(self.coordinates)
 
 
 @dataclass
@@ -181,6 +201,10 @@ class EpanetTank(EpanetNode):
     # WNTR: bulk_coeff | EPANET INP: TANK tank_id coeff in [REACTIONS]
     bulk_coeff: Optional[float] = None
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _validate_positive(self.diameter, "diameter")
+
 
 # endregion
 
@@ -235,6 +259,11 @@ class EpanetPipe(EpanetLink):
 
     # WNTR: cv | EPANET INP: CV status in [PIPES] or [STATUS] section
     cv: Optional[bool] = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _validate_positive(self.length, "length")
+        _validate_positive(self.diameter, "diameter")
 
 
 @dataclass

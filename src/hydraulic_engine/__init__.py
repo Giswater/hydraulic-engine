@@ -10,7 +10,7 @@ from importlib.metadata import version, PackageNotFoundError
 try:
     __version__ = version("hydraulic-engine")
 except PackageNotFoundError:
-    __version__ = "0.3.2"
+    __version__ = "0.4.0"
 
 __author__ = "BGEO"
 __email__ = "info@bgeo.es"
@@ -23,6 +23,12 @@ from .exceptions import (
     FileLoadError,
     FileWriteError,
     UnsupportedFileTypeError,
+    ModelNotLoadedError,
+    ValidationError,
+    DatabaseError,
+    APIError,
+    ExportError,
+    SimulationError,
 )
 from .utils import (
     ExportDataSource,
@@ -47,6 +53,12 @@ __all__ = [
     "FileLoadError",
     "FileWriteError",
     "UnsupportedFileTypeError",
+    "ModelNotLoadedError",
+    "ValidationError",
+    "DatabaseError",
+    "APIError",
+    "ExportError",
+    "SimulationError",
     "ExportDataSource",
     "create_pg_connection",
     "create_gpkg_connection",

@@ -65,5 +65,6 @@ def reset_session() -> None:
     session_vars['last_error_msg'] = None
     session_vars['threads'] = []
     session_vars['db_connection'] = None
+    session_vars['api_client'] = None
 
 # endregion

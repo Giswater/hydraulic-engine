@@ -18,6 +18,13 @@ from .inp_handler import EpanetInpHandler
 from ..utils import tools_log
 from ..utils.tools_api import get_api_client, HeFrostClient
 from ..utils import tools_sensorthings
+from ..exceptions import (
+    ModelNotLoadedError,
+    DatabaseError,
+    ExportError,
+    SimulationError,
+    APIError,
+)
 from ..utils.tools_db import HePgDao, get_connection
 
 
@@ -68,26 +75,21 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
         :return: True if export successful, False otherwise
         """
         if not self.is_loaded():
-            tools_log.log_error("No binary file loaded")
-            return False
+            raise ModelNotLoadedError("No binary file loaded")
 
-        # Get database connection
         if dao is None:
             dao = get_connection()
 
         if dao is None or not dao.is_connected():
-            tools_log.log_error("No database connection available")
-            return False
+            raise DatabaseError("No database connection available")
 
         results: wntr.sim.SimulationResults = self.file_object
 
         try:
             tools_log.log_info(f"Starting export to database for result_id: {result_id}")
 
-            # Step 1: Clean previous results for this result_id
             tools_log.log_info("Cleaning previous results...")
-            if not _clean_previous_results(dao, result_id, giswater_version):
-                raise Exception("Failed to clean previous results")
+            _clean_previous_results(dao, result_id, giswater_version)
 
             # Step 2: Insert time series data into rpt_node
             tools_log.log_info("Inserting node results...")
@@ -116,17 +118,23 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             tools_log.log_info("Updating result catalog and selectors...")
             _finalize_import(dao, result_id, giswater_version)
 
-            # Commit all changes
-            if not dao.commit():
-                tools_log.log_error(f"Failed to commit changes to database for result_id: {result_id}")
-                raise Exception("Failed to commit changes to database")
+            dao.commit()
             tools_log.log_info(f"Export to database completed successfully for result_id: {result_id}")
             return True
 
+        except (DatabaseError, ExportError, SimulationError, ModelNotLoadedError):
+            try:
+                dao.rollback()
+            except DatabaseError:
+                pass
+            raise
         except Exception as e:
             tools_log.log_error(f"Error exporting to database: {e}")
-            dao.rollback()
-            return False
+            try:
+                dao.rollback()
+            except DatabaseError:
+                pass
+            raise ExportError(f"Error exporting to database: {e}") from e
 
     def export_to_frost(
             self,
@@ -157,12 +165,10 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             client = get_api_client()
 
         if not client or not isinstance(client, HeFrostClient):
-            tools_log.log_error("No FROST client available")
-            return False
+            raise APIError("No FROST client available")
 
         if not self.is_loaded():
-            tools_log.log_error("No OUT file loaded")
-            return False
+            raise ModelNotLoadedError("No binary file loaded")
 
         # Delete all existing entities. Note: This is only used for testing purposes.
         # if delete_all:
@@ -176,8 +182,7 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
 
         # Check if INP file is loaded
         if not inp_handler.is_loaded():
-            tools_log.log_error("No INP file loaded")
-            return False
+            raise ModelNotLoadedError("No INP file loaded")
 
         # Determine simulation start time
         if start_time is None:
@@ -273,13 +278,13 @@ def _seconds_to_time_str(seconds: int) -> str:
     return f"{h}:{m:02d}:{s:02d}"
 
 
-def _clean_previous_results(dao: HePgDao, result_id: str, giswater_version: int = 4) -> bool:
+def _clean_previous_results(dao: HePgDao, result_id: str, giswater_version: int = 4) -> None:
     """
     Clean previous results for the given result_id from all rpt tables.
     
     :param dao: Database access object
     :param result_id: Result identifier
-    :return: True if successful
+    :raises DatabaseError: If a delete statement fails
     """
     tables_to_clean = [
         'rpt_node',
@@ -293,11 +298,10 @@ def _clean_previous_results(dao: HePgDao, result_id: str, giswater_version: int 
 
     for table in tables_to_clean:
         sql = f"DELETE FROM {table} WHERE result_id = %s"
-        if not dao.execute(sql, (result_id,), commit=False):
-            tools_log.log_error(f"Failed to clean {table}")
-            return False
-
-    return True
+        try:
+            dao.execute(sql, (result_id,), commit=False)
+        except DatabaseError as e:
+            raise DatabaseError(f"Failed to clean {table}") from e
 
 
 def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, result_id: str, inp_handler: EpanetInpHandler, round_decimals: int = 2, giswater_version: int = 4) -> int:
@@ -317,17 +321,16 @@ def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, resu
     unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
     if unit_system is None:
         tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
-        raise Exception(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
+        raise SimulationError(
+            f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}"
+        )
 
-    # Get available node result types
     node_data = results.node
     if node_data is None:
-        raise Exception("No node data found in results")
+        raise SimulationError("No node data found in results")
 
-    # Get all node IDs from demand (always present)
     if 'demand' not in node_data:
-        tools_log.log_warning("No demand data found in results")
-        raise Exception("No demand data found in results")
+        raise SimulationError("No demand data found in results")
 
     demand_df = node_data['demand']
     node_ids = demand_df.columns.tolist()
@@ -398,17 +401,19 @@ def _insert_arc_results(dao: HePgDao, results: wntr.sim.SimulationResults, resul
     unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
     if unit_system is None:
         tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
-        raise Exception(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
+        raise SimulationError(
+            f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}"
+        )
 
     # Get available link result types
     link_data = results.link
     if link_data is None:
-        raise Exception("No link data found in results")
+        raise SimulationError("No link data found in results")
 
     # Get all link IDs from flowrate (always present)
     if 'flowrate' not in link_data:
         tools_log.log_warning("No flowrate data found in results")
-        raise Exception("No flowrate data found in results")
+        raise SimulationError("No flowrate data found in results")
 
     flow_df = link_data['flowrate']
     link_ids = flow_df.columns.tolist()
@@ -653,13 +658,14 @@ def _finalize_import(dao: HePgDao, result_id: str, giswater_version: int = 4) ->
 
 
 
-def _convert_from_si(value: float, unit_system: wntr.epanet.util.FlowUnits, param: wntr.epanet.util.HydParam, round_decimals: int = 2) -> Optional[float]:
+def _convert_from_si(
+    value: float,
+    unit_system: wntr.epanet.util.FlowUnits,
+    param: wntr.epanet.util.HydParam,
+    round_decimals: int = 2,
+) -> float:
     """Convert value from SI to EPANET units."""
-    try:
-        return round(float(from_si(unit_system, value, param)), round_decimals)
-    except Exception as e:
-        tools_log.log_error(f"Error converting value from SI to EPANET units: {e}")
-        return None
+    return round(float(from_si(unit_system, value, param)), round_decimals)
 
 # endregion
 
@@ -693,6 +699,7 @@ def _prepare_nodes_things_data(
 ) -> List[Dict]:
     """Prepare Thing data for nodes (no HTTP calls)."""
     things_data = []
+    export_errors: List[str] = []
     for node_data in nodes_data:
         node_id = node_data['id']
         node_type = node_data['type']
@@ -737,7 +744,9 @@ def _prepare_nodes_things_data(
                 datastreams.append(datastream)
 
             except Exception as e:
-                tools_log.log_warning(f"Could not process {prop} for {node_id}: {e}")
+                msg = f"Could not process {prop} for {node_id}: {e}"
+                tools_log.log_warning(msg)
+                export_errors.append(msg)
 
         thing_data = {
             "name": node_id,
@@ -754,6 +763,11 @@ def _prepare_nodes_things_data(
             }
         }
         things_data.append(thing_data)
+
+    if export_errors:
+        raise ExportError(
+            "FROST export failed while preparing node Things: " + "; ".join(export_errors)
+        )
 
     return things_data
 
@@ -780,6 +794,7 @@ def _prepare_links_things_data(
 ) -> List[Dict]:
     """Prepare Thing data for links (no HTTP calls)."""
     things_data = []
+    export_errors: List[str] = []
     for link_data in links_data:
         link_id = link_data['id']
         link_type = link_data['type']
@@ -826,7 +841,9 @@ def _prepare_links_things_data(
                 datastreams.append(datastream)
 
             except Exception as e:
-                tools_log.log_warning(f"Could not process {prop} for {link_id}: {e}")
+                msg = f"Could not process {prop} for {link_id}: {e}"
+                tools_log.log_warning(msg)
+                export_errors.append(msg)
 
         thing_data = {
             "name": link_id,
@@ -847,6 +864,11 @@ def _prepare_links_things_data(
         }
         things_data.append(thing_data)
 
+    if export_errors:
+        raise ExportError(
+            "FROST export failed while preparing link Things: " + "; ".join(export_errors)
+        )
+
     return things_data
 
 
@@ -857,8 +879,14 @@ def _get_geometry_from_link(link: wntr.network.Link) -> list[tuple[float, float]
 
     # Check if nodes have coordinates
     if start_node.coordinates is None or len(start_node.coordinates) < 2:
+        tools_log.log_warning(
+            f"Link {link.name}: start node {start_node.name} has no coordinates"
+        )
         return []
     if end_node.coordinates is None or len(end_node.coordinates) < 2:
+        tools_log.log_warning(
+            f"Link {link.name}: end node {end_node.name} has no coordinates"
+        )
         return []
 
     start_coords = (start_node.coordinates[0], start_node.coordinates[1])

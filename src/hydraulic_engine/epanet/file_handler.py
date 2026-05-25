@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..utils import tools_log
 from ..exceptions import FileLoadError, UnsupportedFileTypeError
+from os import PathLike
 
 
 class EpanetFileHandler:
@@ -38,6 +39,12 @@ class EpanetFileHandler:
         :param file_path: Path to file
         :return: True if successful
         """
+        if not isinstance(file_path, (str, PathLike)):
+            self.error_msg = f"Invalid file path type: {type(file_path).__name__}"
+            raise FileLoadError(self.error_msg)
+
+        file_path = os.fspath(file_path)
+
         if not os.path.isfile(file_path):
             self.error_msg = f"File not found: {file_path}"
             tools_log.log_error(self.error_msg)
@@ -60,7 +67,11 @@ class EpanetFileHandler:
                     tools_log.log_error(self.error_msg)
                     raise FileLoadError(self.error_msg)
             elif file_path.endswith(".rpt"):
-                pass
+                self.error_msg = (
+                    ".rpt loading is not supported by EpanetFileHandler; "
+                    "use the runner RPT parsing instead"
+                )
+                raise UnsupportedFileTypeError(self.error_msg)
             elif file_path.endswith(".inp"):
                 self.file_object = wntr.network.WaterNetworkModel(file_path)
             else:

@@ -29,7 +29,7 @@ from .models import (
     EpanetOtherSettings,
 )
 from ..utils import tools_log
-from ..exceptions import FileWriteError
+from ..exceptions import FileWriteError, ModelNotLoadedError, ValidationError
 
 
 # Configuration for feature types mapping to WNTR methods
@@ -55,6 +55,13 @@ _SPECIAL_ATTRS = {'demand_list'}
 
 # Attributes to skip (internal/computed, not settable)
 _SKIP_ATTRS = {'node_type', 'link_type'}
+
+
+def _require_inp_loaded(handler: "EpanetInpHandler") -> wntr.network.WaterNetworkModel:
+    """Return the loaded WNTR model or raise ModelNotLoadedError."""
+    if handler.file_object is None:
+        raise ModelNotLoadedError("No INP file loaded")
+    return handler.file_object
 
 
 class EpanetInpHandler(EpanetFileHandler):
@@ -130,8 +137,8 @@ class EpanetInpHandler(EpanetFileHandler):
             tools_log.log_info(f"INP validation successful: {self.file_path}")
 
         except Exception as e:
-            validation["errors"].append(str(e))
             tools_log.log_error(f"INP validation failed: {e}")
+            raise ValidationError(f"INP validation failed for '{self.file_path}': {e}") from e
 
         return validation
 
@@ -153,20 +160,29 @@ class EpanetInpHandler(EpanetFileHandler):
         :param options_settings: Options settings to update (simulation parameters)
         :param other_settings: Other settings to update (patterns, curves)
         """
-        if not self.file_object:
-            tools_log.log_error("No INP file loaded for updating")
-            return
+        _require_inp_loaded(self)
+
+        validation_errors: list[str] = []
 
         if feature_settings:
-            self._update_features(feature_settings)
+            self._update_features(feature_settings, validation_errors)
 
         if options_settings:
             self._update_options(options_settings)
 
         if other_settings:
-            self._update_other_settings(other_settings)
+            self._update_other_settings(other_settings, validation_errors)
 
-    def _update_features(self, feature_settings: EpanetFeatureSettings) -> None:
+        if validation_errors:
+            raise ValidationError(
+                "INP update failed: " + "; ".join(validation_errors)
+            )
+
+    def _update_features(
+        self,
+        feature_settings: EpanetFeatureSettings,
+        validation_errors: list[str],
+    ) -> None:
         """
         Update INP features from feature settings.
         
@@ -185,16 +201,24 @@ class EpanetInpHandler(EpanetFileHandler):
 
             for element_name, model_obj in features_dict.items():
                 if element_name not in name_list:
-                    tools_log.log_warning(
-                        f"{feature_type[:-1].title()} '{element_name}' not found in network"
+                    msg = (
+                        f"{feature_type[:-1].title()} '{element_name}' "
+                        f"not found in network"
                     )
+                    tools_log.log_warning(msg)
+                    validation_errors.append(msg)
                     continue
 
                 wntr_obj = getter(element_name)
-                self._update_object_attributes(wntr_obj, model_obj)
+                self._update_object_attributes(
+                    wntr_obj, model_obj, validation_errors
+                )
 
     def _update_object_attributes(
-        self, target_obj, source_obj
+        self,
+        target_obj,
+        source_obj,
+        validation_errors: Optional[list[str]] = None,
     ) -> None:
         """
         Update target WNTR object attributes from source model object.
@@ -231,10 +255,13 @@ class EpanetInpHandler(EpanetFileHandler):
                 try:
                     setattr(target_obj, attr_name, value)
                 except AttributeError:
-                    # Some attributes may be read-only
-                    tools_log.log_warning(
-                        f"Cannot set attribute '{attr_name}' on {type(target_obj).__name__}"
+                    msg = (
+                        f"Cannot set attribute '{attr_name}' on "
+                        f"{type(target_obj).__name__}"
                     )
+                    tools_log.log_warning(msg)
+                    if validation_errors is not None:
+                        validation_errors.append(msg)
 
     def _handle_special_attribute(
         self, target_obj, attr_name: str, value
@@ -302,7 +329,11 @@ class EpanetInpHandler(EpanetFileHandler):
                             f"Cannot set option '{attr_name}' on {section_name}"
                         )
 
-    def _update_other_settings(self, other_settings: EpanetOtherSettings) -> None:
+    def _update_other_settings(
+        self,
+        other_settings: EpanetOtherSettings,
+        validation_errors: list[str],
+    ) -> None:
         """
         Update INP other settings (patterns, curves).
         
@@ -321,91 +352,74 @@ class EpanetInpHandler(EpanetFileHandler):
 
             for element_name, model_obj in other_dict.items():
                 if element_name not in name_list:
-                    tools_log.log_warning(
-                        f"{other_type[:-1].title()} '{element_name}' not found in network"
+                    msg = (
+                        f"{other_type[:-1].title()} '{element_name}' "
+                        f"not found in network"
                     )
+                    tools_log.log_warning(msg)
+                    validation_errors.append(msg)
                     continue
 
                 wntr_obj = getter(element_name)
-                self._update_object_attributes(wntr_obj, model_obj)
+                self._update_object_attributes(
+                    wntr_obj, model_obj, validation_errors
+                )
 
     # =========================================================================
     # Section Getters
     # =========================================================================
 
-    def get_title(self) -> Optional[str]:
+    def get_title(self) -> str:
         """Get model title/name."""
-        if self.file_object:
-            return self.file_object.name
-        return None
+        return _require_inp_loaded(self).name
 
-    def get_junctions(self) -> Optional[Dict[str, Any]]:
+    def get_junctions(self) -> Dict[str, Any]:
         """Get JUNCTIONS section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_node(name)
-                for name in self.file_object.junction_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_node(name) for name in wn.junction_name_list}
 
-    def get_reservoirs(self) -> Optional[Dict[str, Any]]:
+    def get_reservoirs(self) -> Dict[str, Any]:
         """Get RESERVOIRS section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_node(name)
-                for name in self.file_object.reservoir_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_node(name) for name in wn.reservoir_name_list}
 
-    def get_tanks(self) -> Optional[Dict[str, Any]]:
+    def get_tanks(self) -> Dict[str, Any]:
         """Get TANKS section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_node(name)
-                for name in self.file_object.tank_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_node(name) for name in wn.tank_name_list}
 
-    def get_pipes(self) -> Optional[Dict[str, Any]]:
+    def get_pipes(self) -> Dict[str, Any]:
         """Get PIPES section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_link(name)
-                for name in self.file_object.pipe_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_link(name) for name in wn.pipe_name_list}
 
-    def get_pumps(self) -> Optional[Dict[str, Any]]:
+    def get_pumps(self) -> Dict[str, Any]:
         """Get PUMPS section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_link(name)
-                for name in self.file_object.pump_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_link(name) for name in wn.pump_name_list}
 
-    def get_valves(self) -> Optional[Dict[str, Any]]:
+    def get_valves(self) -> Dict[str, Any]:
         """Get VALVES section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_link(name)
-                for name in self.file_object.valve_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_link(name) for name in wn.valve_name_list}
 
-    def get_patterns(self) -> Optional[Dict[str, Any]]:
+    def get_patterns(self) -> Dict[str, Any]:
         """Get PATTERNS section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_pattern(name)
-                for name in self.file_object.pattern_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_pattern(name) for name in wn.pattern_name_list}
 
-    def get_curves(self) -> Optional[Dict[str, Any]]:
+    def get_curves(self) -> Dict[str, Any]:
         """Get CURVES section as dictionary."""
-        if not self.file_object:
-            return None
-        return {name: self.file_object.get_curve(name)
-                for name in self.file_object.curve_name_list}
+        wn = _require_inp_loaded(self)
+        return {name: wn.get_curve(name) for name in wn.curve_name_list}
 
-    def get_controls(self) -> Optional[Dict[str, Any]]:
+    def get_controls(self) -> Dict[str, Any]:
         """Get CONTROLS section as dictionary."""
-        if not self.file_object:
-            return None
-        return dict(self.file_object.controls)
+        return dict(_require_inp_loaded(self).controls)
 
-    def get_options(self) -> Optional[Any]:
+    def get_options(self) -> Any:
         """Get OPTIONS object."""
-        if self.file_object:
-            return self.file_object.options
-        return None
+        return _require_inp_loaded(self).options
 
     # =========================================================================
     # Count Methods
@@ -413,51 +427,35 @@ class EpanetInpHandler(EpanetFileHandler):
 
     def get_junctions_count(self) -> int:
         """Get the count of junctions."""
-        if self.file_object:
-            return self.file_object.num_junctions
-        return 0
+        return _require_inp_loaded(self).num_junctions
 
     def get_reservoirs_count(self) -> int:
         """Get the count of reservoirs."""
-        if self.file_object:
-            return self.file_object.num_reservoirs
-        return 0
+        return _require_inp_loaded(self).num_reservoirs
 
     def get_tanks_count(self) -> int:
         """Get the count of tanks."""
-        if self.file_object:
-            return self.file_object.num_tanks
-        return 0
+        return _require_inp_loaded(self).num_tanks
 
     def get_pipes_count(self) -> int:
         """Get the count of pipes."""
-        if self.file_object:
-            return self.file_object.num_pipes
-        return 0
+        return _require_inp_loaded(self).num_pipes
 
     def get_pumps_count(self) -> int:
         """Get the count of pumps."""
-        if self.file_object:
-            return self.file_object.num_pumps
-        return 0
+        return _require_inp_loaded(self).num_pumps
 
     def get_valves_count(self) -> int:
         """Get the count of valves."""
-        if self.file_object:
-            return self.file_object.num_valves
-        return 0
+        return _require_inp_loaded(self).num_valves
 
     def get_patterns_count(self) -> int:
         """Get the count of patterns."""
-        if self.file_object:
-            return len(self.file_object.pattern_name_list)
-        return 0
+        return len(_require_inp_loaded(self).pattern_name_list)
 
     def get_curves_count(self) -> int:
         """Get the count of curves."""
-        if self.file_object:
-            return len(self.file_object.curve_name_list)
-        return 0
+        return len(_require_inp_loaded(self).curve_name_list)
 
     # =========================================================================
     # Summary

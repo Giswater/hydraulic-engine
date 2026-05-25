@@ -11,6 +11,14 @@ from enum import Enum
 from datetime import datetime, time, date
 from dataclasses import dataclass
 
+from ..exceptions import ValidationError
+
+
+def _validate_positive(value: Optional[float], field_name: str) -> None:
+    if value is not None and value <= 0:
+        raise ValidationError(f"{field_name} must be positive, got {value}")
+
+
 # region Base Classes
 
 @dataclass
@@ -222,6 +230,9 @@ class SwmmConduit(SwmmLink):
     offset_downstream: Optional[float] = None
     flow_initial: Optional[float] = None
     flow_max: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        _validate_positive(self.length, "length")
 
 @dataclass
 class SwmmPump(SwmmLink):

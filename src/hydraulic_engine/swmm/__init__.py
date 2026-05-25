@@ -7,6 +7,18 @@ or (at your option) any later version.
 SWMM module - Storm Water Management Model functionality.
 """
 # -*- coding: utf-8 -*-
+from ..exceptions import (
+    HydraulicEngineError,
+    FileLoadError,
+    FileWriteError,
+    UnsupportedFileTypeError,
+    ModelNotLoadedError,
+    ValidationError,
+    DatabaseError,
+    APIError,
+    ExportError,
+    SimulationError,
+)
 from .runner import SwmmRunner
 from .inp_handler import SwmmInpHandler
 from .rpt_handler import SwmmRptHandler
@@ -15,12 +27,24 @@ from .file_handler import SwmmFileHandler
 from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings, \
                     SwmmCrossSection, SwmmJunction, SwmmOutfall, SwmmDivider, SwmmStorage, SwmmConduit, SwmmPump, \
                     SwmmOrifice, SwmmWeir, SwmmOutlet, SwmmCurve, SwmmTimeseries, SwmmPattern, \
-                    SwmmCrossSectionShape, SwmmOutfallKind, SwmmOutfallKind, SwmmDividerKind, SwmmStorageKind, \
+                    SwmmCrossSectionShape, SwmmOutfallKind, SwmmDividerKind, SwmmStorageKind, \
                     SwmmPumpStatus, SwmmOrificeOrientation, SwmmWeirForm, SwmmWeirRoadSurface, SwmmOutletCurveType, \
                     SwmmFlowUnits, SwmmInfiltration, SwmmFlowRouting, SwmmLinkOffsets, SwmmForceMainEquation, \
                     SwmmInertialDamping, SwmmNormalFlowLimited, SwmmPatternCycle, SwmmCurveKind
 
 __all__ = [
+    # Exceptions
+    "HydraulicEngineError",
+    "FileLoadError",
+    "FileWriteError",
+    "UnsupportedFileTypeError",
+    "ModelNotLoadedError",
+    "ValidationError",
+    "DatabaseError",
+    "APIError",
+    "ExportError",
+    "SimulationError",
+    # Handlers and Runner
     "SwmmRunner",
     "SwmmInpHandler",
     "SwmmRptHandler",

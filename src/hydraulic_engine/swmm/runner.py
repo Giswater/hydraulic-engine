@@ -19,7 +19,7 @@ from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
 from .inp_handler import SwmmInpHandler
 from ..utils import tools_log
 from ..utils.tools_api import HeFrostClient
-from ..exceptions import HydraulicEngineError
+from ..exceptions import ValidationError, UnsupportedFileTypeError
 
 
 @dataclass
@@ -129,20 +129,15 @@ class SwmmRunner:
         result = SwmmRunResult()
 
         self.inp = SwmmInpHandler()
-        try:
-            self.inp.load_file(self.inp_path)
-        except HydraulicEngineError as e:
-            result.status = RunStatus.ERROR
-            result.errors.append(str(e))
-            tools_log.log_error(f"Failed to load INP file: {e}")
-            return result
+        self.inp.load_file(self.inp_path)
 
         validation = self.inp.validate_inp()
         if not validation["valid"]:
-            result.status = RunStatus.ERROR
-            result.errors.append(f"INP file validation failed: {self.inp_path}")
-            tools_log.log_error(f"INP file validation failed: {self.inp_path}")
-            return result
+            errors = validation.get("errors", [])
+            raise ValidationError(
+                f"INP file validation failed for '{self.inp_path}': "
+                + "; ".join(errors)
+            )
 
         self.rpt = SwmmRptHandler()
         self.out = SwmmOutHandler()
@@ -155,8 +150,7 @@ class SwmmRunner:
         result.rpt_path = self.rpt.file_path
         result.out_path = self.out.file_path
 
-        # Modify the INP file with the feature settings, options settings and other settings
-        try:
+        if feature_settings or options_settings or other_settings:
             self.inp.update_inp_from_settings(
                 feature_settings=feature_settings,
                 options_settings=options_settings,
@@ -165,11 +159,6 @@ class SwmmRunner:
             temp_inp_path = self.inp.get_file_path(None, ".inp")
             self.inp.write(output_path=temp_inp_path)
             result.inp_path = str(temp_inp_path)
-        except Exception as e:
-            result.status = RunStatus.ERROR
-            result.errors.append(f"Failed to update INP file with settings: {e}")
-            tools_log.log_error(f"Failed to update INP file with settings: {e}")
-            return result
 
         self._report_progress(5, "Starting SWMM simulation...")
         tools_log.log_info(f"Running SWMM simulation: {self.inp_path}")
@@ -244,8 +233,10 @@ class SwmmRunner:
                 try:
                     result.flow_routing_error = sim.flow_routing_error
                     result.runoff_error = sim.runoff_error
-                except AttributeError:
-                    pass
+                except AttributeError as e:
+                    msg = f"Could not read simulation statistics: {e}"
+                    tools_log.log_warning(msg)
+                    result.warnings.append(msg)
 
             self._report_progress(90, "Simulation completed, checking results...")
 
@@ -281,10 +272,8 @@ class SwmmRunner:
                 f"({result.duration_seconds:.2f}s, {result.routing_steps} steps)"
             )
 
-        except ImportError as e:
-            result.status = RunStatus.ERROR
-            result.errors.append(f"pyswmm not installed: {e}. Install with: pip install pyswmm")
-            tools_log.log_error(f"pyswmm not installed: {e}")
+        except ImportError:
+            raise
 
         except Exception as e:
             result.status = RunStatus.ERROR
@@ -324,7 +313,9 @@ class SwmmRunner:
                     result.warnings.append(line_stripped)
 
         except Exception as e:
-            tools_log.log_warning(f"Could not parse RPT file for status: {e}")
+            msg = f"Could not parse RPT file for status: {e}"
+            tools_log.log_warning(msg)
+            result.warnings.append(msg)
 
     def export_result(
             self,
@@ -341,7 +332,7 @@ class SwmmRunner:
         """
 
         if to == ExportDataSource.DATABASE:
-            pass
+            return self.out.export_to_database()
         elif to == ExportDataSource.FROST:
             return self.out.export_to_frost(
                 inp_handler=self.inp,
@@ -352,3 +343,5 @@ class SwmmRunner:
                 crs_to=crs_to,
                 client=client,
             )
+        else:
+            raise UnsupportedFileTypeError(f"Unsupported export target: {to}")

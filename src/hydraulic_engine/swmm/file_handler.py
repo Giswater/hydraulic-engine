@@ -16,6 +16,8 @@ from swmm_api import read_rpt_file
 from swmm_api import read_inp_file
 
 from ..utils import tools_log
+from os import PathLike
+
 from ..exceptions import FileLoadError, UnsupportedFileTypeError
 
 
@@ -39,6 +41,12 @@ class SwmmFileHandler:
         :param file_path: Path to file
         :return: True if successful
         """
+        if not isinstance(file_path, (str, PathLike)):
+            self.error_msg = f"Invalid file path type: {type(file_path).__name__}"
+            raise FileLoadError(self.error_msg)
+
+        file_path = os.fspath(file_path)
+
         if not os.path.isfile(file_path):
             self.error_msg = f"File not found: {file_path}"
             tools_log.log_error(self.error_msg)

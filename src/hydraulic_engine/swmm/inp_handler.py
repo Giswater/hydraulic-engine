@@ -11,7 +11,21 @@ from typing import Any, Dict, List, Optional
 from .file_handler import SwmmFileHandler
 from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
 from ..utils import tools_log
-from ..exceptions import FileWriteError
+from ..exceptions import FileWriteError, ModelNotLoadedError, ValidationError
+
+
+def _require_inp_loaded(handler: "SwmmInpHandler") -> Any:
+    if handler.file_object is None:
+        raise ModelNotLoadedError("No INP file loaded")
+    return handler.file_object
+
+
+def _get_section_dict(handler: "SwmmInpHandler", section_name: str) -> Dict[str, Any]:
+    inp = _require_inp_loaded(handler)
+    if not hasattr(inp, section_name):
+        return {}
+    section = getattr(inp, section_name)
+    return dict(section) if section else {}
 
 
 class SwmmInpHandler(SwmmFileHandler):
@@ -92,8 +106,8 @@ class SwmmInpHandler(SwmmFileHandler):
             tools_log.log_info(f"INP validation successful: {self.file_path}")
 
         except Exception as e:
-            validation["errors"].append(str(e))
             tools_log.log_error(f"INP validation failed: {e}")
+            raise ValidationError(f"INP validation failed for '{self.file_path}': {e}") from e
 
         return validation
 
@@ -116,19 +130,28 @@ class SwmmInpHandler(SwmmFileHandler):
         :param other_settings: Other settings to update
         """
 
-        # Update feature settings
+        _require_inp_loaded(self)
+        validation_errors: list[str] = []
+
         if feature_settings:
-            self._update_features(feature_settings)
+            self._update_features(feature_settings, validation_errors)
 
-        # Update options settings
         if options_settings:
-            self._update_options(options_settings)
+            self._update_options(options_settings, validation_errors)
 
-        # Update other settings
         if other_settings:
-            self._update_other_settings(other_settings)
+            self._update_other_settings(other_settings, validation_errors)
 
-    def _update_features(self, feature_settings: SwmmFeatureSettings) -> None:
+        if validation_errors:
+            raise ValidationError(
+                "INP update failed: " + "; ".join(validation_errors)
+            )
+
+    def _update_features(
+        self,
+        feature_settings: SwmmFeatureSettings,
+        validation_errors: list[str],
+    ) -> None:
         """Update INP features from feature settings."""
         # Iterate through all feature setting attributes
         for section_name in dir(feature_settings):
@@ -139,18 +162,18 @@ class SwmmInpHandler(SwmmFileHandler):
             if features_dict is None:
                 continue
 
-            # Convert attribute name to uppercase section name (e.g., 'conduits' -> 'CONDUITS')
             section_name = section_name.upper()
 
-            # Check if the section exists in the INP file
             if not hasattr(self.file_object, section_name):
+                msg = f"Section {section_name} not in INP"
+                tools_log.log_warning(msg)
+                validation_errors.append(msg)
                 continue
 
             inp_section = getattr(self.file_object, section_name)
             if inp_section is None:
                 continue
 
-            # Update each feature in the section
             for feature_name, feature_obj in features_dict.items():
                 if feature_name in inp_section:
                     self._update_object_attributes(inp_section[feature_name], feature_obj)
@@ -160,9 +183,14 @@ class SwmmInpHandler(SwmmFileHandler):
                     if hasattr(feature_obj, 'cross_section') and feature_obj.cross_section is not None:
                         self._update_cross_section(feature_name, feature_obj.cross_section)
 
-    def _update_options(self, options_settings: SwmmOptionsSettings) -> None:
+    def _update_options(
+        self,
+        options_settings: SwmmOptionsSettings,
+        validation_errors: list[str],
+    ) -> None:
         """Update INP options from options settings."""
         if not hasattr(self.file_object, 'OPTIONS'):
+            validation_errors.append("Section OPTIONS not in INP")
             return
 
         options = self.file_object.OPTIONS
@@ -186,7 +214,11 @@ class SwmmInpHandler(SwmmFileHandler):
             if option_name in options:
                 options[option_name] = value
 
-    def _update_other_settings(self, other_settings: SwmmOtherSettings) -> None:
+    def _update_other_settings(
+        self,
+        other_settings: SwmmOtherSettings,
+        validation_errors: list[str],
+    ) -> None:
         """Update INP other settings (curves, timeseries, patterns)."""
         # Iterate through all other setting attributes
         for attr_name in dir(other_settings):
@@ -200,15 +232,16 @@ class SwmmInpHandler(SwmmFileHandler):
             # Convert attribute name to uppercase section name (e.g., 'curves' -> 'CURVES')
             section_name = attr_name.upper()
 
-            # Check if the section exists in the INP file
             if not hasattr(self.file_object, section_name):
+                msg = f"Section {section_name} not in INP"
+                tools_log.log_warning(msg)
+                validation_errors.append(msg)
                 continue
 
             inp_section = getattr(self.file_object, section_name)
             if inp_section is None:
                 continue
 
-            # Update each item in the section
             for item_name, item_obj in setting_dict.items():
                 if item_name in inp_section:
                     self._update_object_attributes(inp_section[item_name], item_obj)
@@ -260,160 +293,107 @@ class SwmmInpHandler(SwmmFileHandler):
 
     def get_title(self) -> Optional[str]:
         """Get model title."""
-        if not self.file_object:
-            return None
-        return getattr(self.file_object.TITLE, 'title', None) if hasattr(self.file_object, 'TITLE') else None
+        inp = _require_inp_loaded(self)
+        return getattr(inp.TITLE, 'title', None) if hasattr(inp, 'TITLE') else None
 
-    def get_options(self) -> Optional[Dict[str, Any]]:
+    def get_options(self) -> Dict[str, Any]:
         """Get OPTIONS section as dictionary."""
-        if not self.file_object or not hasattr(self.file_object, 'OPTIONS'):
-            return None
-        try:
-            return {k: v for k, v in vars(self.file_object.OPTIONS).items() if not k.startswith('_')}
-        except Exception:
-            return None
+        inp = _require_inp_loaded(self)
+        if not hasattr(inp, 'OPTIONS'):
+            return {}
+        return {k: v for k, v in vars(inp.OPTIONS).items() if not k.startswith('_')}
 
-    def get_junctions(self) -> Optional[Dict[str, Any]]:
-        """
-        Get JUNCTIONS section.
-        
-        :return: Dictionary of junctions {id: junction_data}
-        """
-        if not self.file_object or not hasattr(self.file_object, 'JUNCTIONS'):
-            return None
-        return dict(self.file_object.JUNCTIONS)
+    def get_junctions(self) -> Dict[str, Any]:
+        """Get JUNCTIONS section."""
+        return _get_section_dict(self, 'JUNCTIONS')
 
-    def get_outfalls(self) -> Optional[Dict[str, Any]]:
+    def get_outfalls(self) -> Dict[str, Any]:
         """Get OUTFALLS section."""
-        if not self.file_object or not hasattr(self.file_object, 'OUTFALLS'):
-            return None
-        return dict(self.file_object.OUTFALLS)
+        return _get_section_dict(self, 'OUTFALLS')
 
-    def get_storage(self) -> Optional[Dict[str, Any]]:
+    def get_storage(self) -> Dict[str, Any]:
         """Get STORAGE section."""
-        if not self.file_object or not hasattr(self.file_object, 'STORAGE'):
-            return None
-        return dict(self.file_object.STORAGE)
+        return _get_section_dict(self, 'STORAGE')
 
-    def get_dividers(self) -> Optional[Dict[str, Any]]:
+    def get_dividers(self) -> Dict[str, Any]:
         """Get DIVIDERS section."""
-        if not self.file_object or not hasattr(self.file_object, 'DIVIDERS'):
-            return None
-        return dict(self.file_object.DIVIDERS)
+        return _get_section_dict(self, 'DIVIDERS')
 
-    def get_conduits(self) -> Optional[Dict[str, Any]]:
+    def get_conduits(self) -> Dict[str, Any]:
         """Get CONDUITS section."""
-        if not self.file_object or not hasattr(self.file_object, 'CONDUITS'):
-            return None
-        return dict(self.file_object.CONDUITS)
+        return _get_section_dict(self, 'CONDUITS')
 
-    def get_pumps(self) -> Optional[Dict[str, Any]]:
+    def get_pumps(self) -> Dict[str, Any]:
         """Get PUMPS section."""
-        if not self.file_object or not hasattr(self.file_object, 'PUMPS'):
-            return None
-        return dict(self.file_object.PUMPS)
+        return _get_section_dict(self, 'PUMPS')
 
-    def get_orifices(self) -> Optional[Dict[str, Any]]:
+    def get_orifices(self) -> Dict[str, Any]:
         """Get ORIFICES section."""
-        if not self.file_object or not hasattr(self.file_object, 'ORIFICES'):
-            return None
-        return dict(self.file_object.ORIFICES)
+        return _get_section_dict(self, 'ORIFICES')
 
-    def get_weirs(self) -> Optional[Dict[str, Any]]:
+    def get_weirs(self) -> Dict[str, Any]:
         """Get WEIRS section."""
-        if not self.file_object or not hasattr(self.file_object, 'WEIRS'):
-            return None
-        return dict(self.file_object.WEIRS)
+        return _get_section_dict(self, 'WEIRS')
 
-    def get_outlets(self) -> Optional[Dict[str, Any]]:
+    def get_outlets(self) -> Dict[str, Any]:
         """Get OUTLETS section."""
-        if not self.file_object or not hasattr(self.file_object, 'OUTLETS'):
-            return None
-        return dict(self.file_object.OUTLETS)
+        return _get_section_dict(self, 'OUTLETS')
 
-    def get_subcatchments(self) -> Optional[Dict[str, Any]]:
+    def get_subcatchments(self) -> Dict[str, Any]:
         """Get SUBCATCHMENTS section."""
-        if not self.file_object or not hasattr(self.file_object, 'SUBCATCHMENTS'):
-            return None
-        return dict(self.file_object.SUBCATCHMENTS)
+        return _get_section_dict(self, 'SUBCATCHMENTS')
 
-    def get_subareas(self) -> Optional[Dict[str, Any]]:
+    def get_subareas(self) -> Dict[str, Any]:
         """Get SUBAREAS section."""
-        if not self.file_object or not hasattr(self.file_object, 'SUBAREAS'):
-            return None
-        return dict(self.file_object.SUBAREAS)
+        return _get_section_dict(self, 'SUBAREAS')
 
-    def get_infiltration(self) -> Optional[Dict[str, Any]]:
+    def get_infiltration(self) -> Dict[str, Any]:
         """Get INFILTRATION section."""
-        if not self.file_object or not hasattr(self.file_object, 'INFILTRATION'):
-            return None
-        return dict(self.file_object.INFILTRATION)
+        return _get_section_dict(self, 'INFILTRATION')
 
-    def get_coordinates(self) -> Optional[Dict[str, tuple]]:
+    def get_coordinates(self) -> Dict[str, tuple]:
         """Get COORDINATES section."""
-        if not self.file_object or not hasattr(self.file_object, 'COORDINATES'):
-            return None
-        return dict(self.file_object.COORDINATES)
+        return _get_section_dict(self, 'COORDINATES')
 
-    def get_vertices(self) -> Optional[Dict[str, List[tuple]]]:
+    def get_vertices(self) -> Dict[str, List[tuple]]:
         """Get VERTICES section (link vertices)."""
-        if not self.file_object or not hasattr(self.file_object, 'VERTICES'):
-            return None
-        return dict(self.file_object.VERTICES)
+        return _get_section_dict(self, 'VERTICES')
 
-    def get_polygons(self) -> Optional[Dict[str, List[tuple]]]:
+    def get_polygons(self) -> Dict[str, List[tuple]]:
         """Get POLYGONS section (subcatchment polygons)."""
-        if not self.file_object or not hasattr(self.file_object, 'POLYGONS'):
-            return None
-        return dict(self.file_object.POLYGONS)
+        return _get_section_dict(self, 'POLYGONS')
 
-    def get_xsections(self) -> Optional[Dict[str, Any]]:
+    def get_xsections(self) -> Dict[str, Any]:
         """Get XSECTIONS section."""
-        if not self.file_object or not hasattr(self.file_object, 'XSECTIONS'):
-            return None
-        return dict(self.file_object.XSECTIONS)
+        return _get_section_dict(self, 'XSECTIONS')
 
-    def get_transects(self) -> Optional[Dict[str, Any]]:
+    def get_transects(self) -> Dict[str, Any]:
         """Get TRANSECTS section."""
-        if not self.file_object or not hasattr(self.file_object, 'TRANSECTS'):
-            return None
-        return dict(self.file_object.TRANSECTS)
+        return _get_section_dict(self, 'TRANSECTS')
 
-    def get_curves(self) -> Optional[Dict[str, Any]]:
+    def get_curves(self) -> Dict[str, Any]:
         """Get CURVES section."""
-        if not self.file_object or not hasattr(self.file_object, 'CURVES'):
-            return None
-        return dict(self.file_object.CURVES)
+        return _get_section_dict(self, 'CURVES')
 
-    def get_timeseries(self) -> Optional[Dict[str, Any]]:
+    def get_timeseries(self) -> Dict[str, Any]:
         """Get TIMESERIES section."""
-        if not self.file_object or not hasattr(self.file_object, 'TIMESERIES'):
-            return None
-        return dict(self.file_object.TIMESERIES)
+        return _get_section_dict(self, 'TIMESERIES')
 
-    def get_patterns(self) -> Optional[Dict[str, Any]]:
+    def get_patterns(self) -> Dict[str, Any]:
         """Get PATTERNS section."""
-        if not self.file_object or not hasattr(self.file_object, 'PATTERNS'):
-            return None
-        return dict(self.file_object.PATTERNS)
+        return _get_section_dict(self, 'PATTERNS')
 
-    def get_raingages(self) -> Optional[Dict[str, Any]]:
+    def get_raingages(self) -> Dict[str, Any]:
         """Get RAINGAGES section."""
-        if not self.file_object or not hasattr(self.file_object, 'RAINGAGES'):
-            return None
-        return dict(self.file_object.RAINGAGES)
+        return _get_section_dict(self, 'RAINGAGES')
 
-    def get_inflows(self) -> Optional[Dict[str, Any]]:
+    def get_inflows(self) -> Dict[str, Any]:
         """Get INFLOWS section."""
-        if not self.file_object or not hasattr(self.file_object, 'INFLOWS'):
-            return None
-        return dict(self.file_object.INFLOWS)
+        return _get_section_dict(self, 'INFLOWS')
 
-    def get_dwf(self) -> Optional[Dict[str, Any]]:
+    def get_dwf(self) -> Dict[str, Any]:
         """Get DWF (Dry Weather Flow) section."""
-        if not self.file_object or not hasattr(self.file_object, 'DWF'):
-            return None
-        return dict(self.file_object.DWF)
+        return _get_section_dict(self, 'DWF')
 
     # =========================================================================
     # Summary and Statistics
@@ -469,17 +449,15 @@ class SwmmInpHandler(SwmmFileHandler):
         """
         Get the raw swmm_api SwmmInput object.
         
-        :return: SwmmInput object or None
+        :return: SwmmInput object
         """
-        return self.file_object
+        return _require_inp_loaded(self)
 
     def get_section(self, section_name: str) -> Optional[Any]:
         """
         Get any section by name.
         
         :param section_name: Section name (e.g., 'JUNCTIONS', 'CONDUITS')
-        :return: Section data or None
+        :return: Section data or None if the section is not present
         """
-        if not self.file_object:
-            return None
-        return getattr(self.file_object, section_name.upper(), None)
+        return getattr(_require_inp_loaded(self), section_name.upper(), None)

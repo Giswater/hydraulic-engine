@@ -8,6 +8,7 @@ or (at your option) any later version.
 import logging
 import inspect
 import os
+import sys
 import time
 from typing import Optional
 
@@ -95,8 +96,8 @@ class HeLogger:
             self.fh.flush()
             self.fh.close()
             del self.fh
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error closing logger: {e}", file=sys.stderr)
 
     def debug(self, msg: Optional[str] = None, stack_level: int = 2, stack_level_increase: int = 0) -> None:
         """Log message with level DEBUG (10)"""
@@ -146,7 +147,7 @@ class HeLogger:
             self.logger_file.log(log_level, text)
 
         except Exception as e:
-            print(f"Error logging: {e}")
+            print(f"Error logging: {e}", file=sys.stderr)
 
 
 def set_logger(logger_name: str, min_log_level: int = 20) -> None:

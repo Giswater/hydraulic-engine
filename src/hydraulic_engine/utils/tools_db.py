@@ -17,6 +17,7 @@ try:
 except ImportError:
     PSYCOPG_AVAILABLE = False
 
+from ..exceptions import DatabaseError
 from . import tools_log
 
 
@@ -93,24 +94,31 @@ class HeDbDao(ABC):
         Commit the current transaction.
 
         :return: True if commit successful
+        :raises DatabaseError: If not connected or commit fails
         """
+        if not self.conn:
+            raise DatabaseError("Not connected to database")
         try:
-            if self.conn:
-                self.conn.commit()
-                return True
+            self.conn.commit()
+            return True
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Commit error: {e}")
-        return False
+            raise DatabaseError(f"Commit error: {e}") from e
 
     def rollback(self) -> None:
-        """Rollback the current transaction."""
+        """Rollback the current transaction.
+
+        :raises DatabaseError: If rollback fails
+        """
+        if not self.conn:
+            return
         try:
-            if self.conn:
-                self.conn.rollback()
+            self.conn.rollback()
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Rollback error: {e}")
+            raise DatabaseError(f"Rollback error: {e}") from e
 
     def is_connected(self) -> bool:
         """
@@ -162,9 +170,9 @@ class HePgDao(HeDbDao):
         :return: True if connection successful
         """
         if not PSYCOPG_AVAILABLE:
-            self.last_error = "psycopg3 is not installed. Install with: pip install psycopg[binary]"
-            tools_log.log_error(self.last_error)
-            return False
+            raise ImportError(
+                "psycopg3 is not installed. Install with: pip install psycopg[binary]"
+            )
 
         try:
             # Store connection params for cloning
@@ -199,7 +207,7 @@ class HePgDao(HeDbDao):
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"PostgreSQL connection error: {e}")
-            return False
+            raise DatabaseError(f"PostgreSQL connection error: {e}") from e
 
     def close_db(self) -> None:
         """Close the database connection."""
@@ -214,6 +222,7 @@ class HePgDao(HeDbDao):
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Error closing PostgreSQL connection: {e}")
+            raise DatabaseError(f"Error closing PostgreSQL connection: {e}") from e
 
     def execute(self, sql: str, params: Optional[tuple] = None, commit: bool = True) -> bool:
         """
@@ -224,11 +233,10 @@ class HePgDao(HeDbDao):
         :param commit: Whether to commit after execution
         :return: True if execution successful
         """
-        try:
-            if not self.conn or not self.cursor:
-                self.last_error = "Not connected to database"
-                return False
+        if not self.conn or not self.cursor:
+            raise DatabaseError("Not connected to database")
 
+        try:
             if params:
                 self.cursor.execute(sql, params)
             else:
@@ -239,11 +247,16 @@ class HePgDao(HeDbDao):
 
             return True
 
+        except DatabaseError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Execute error: {e}\nSQL: {sql}")
-            self.rollback()
-            return False
+            try:
+                self.rollback()
+            except DatabaseError:
+                pass
+            raise DatabaseError(f"Execute error: {e}\nSQL: {sql}") from e
 
     def get_rows(self, sql: str, params: Optional[tuple] = None) -> Optional[List[tuple]]:
         """
@@ -251,24 +264,27 @@ class HePgDao(HeDbDao):
 
         :param sql: SQL query
         :param params: Query parameters
-        :return: List of rows or None
+        :return: List of rows (empty list if no rows)
+        :raises DatabaseError: If not connected or query fails
         """
-        try:
-            if not self.conn or not self.cursor:
-                self.last_error = "Not connected to database"
-                return None
+        if not self.conn or not self.cursor:
+            raise DatabaseError("Not connected to database")
 
+        try:
             if params:
                 self.cursor.execute(sql, params)
             else:
                 self.cursor.execute(sql)
 
-            return self.cursor.fetchall()
+            rows = self.cursor.fetchall()
+            return rows if rows is not None else []
 
+        except DatabaseError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Query error: {e}\nSQL: {sql}")
-            return None
+            raise DatabaseError(f"Query error: {e}\nSQL: {sql}") from e
 
     def get_row(self, sql: str, params: Optional[tuple] = None) -> Optional[tuple]:
         """
@@ -276,13 +292,13 @@ class HePgDao(HeDbDao):
 
         :param sql: SQL query
         :param params: Query parameters
-        :return: First row or None
+        :return: First row or None if no row matches
+        :raises DatabaseError: If not connected or query fails
         """
-        try:
-            if not self.conn or not self.cursor:
-                self.last_error = "Not connected to database"
-                return None
+        if not self.conn or not self.cursor:
+            raise DatabaseError("Not connected to database")
 
+        try:
             if params:
                 self.cursor.execute(sql, params)
             else:
@@ -290,10 +306,12 @@ class HePgDao(HeDbDao):
 
             return self.cursor.fetchone()
 
+        except DatabaseError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Query error: {e}\nSQL: {sql}")
-            return None
+            raise DatabaseError(f"Query error: {e}\nSQL: {sql}") from e
 
     def get_rows_dict(self, sql: str, params: Optional[tuple] = None) -> Optional[List[Dict[str, Any]]]:
         """
@@ -301,24 +319,27 @@ class HePgDao(HeDbDao):
 
         :param sql: SQL query
         :param params: Query parameters
-        :return: List of dictionaries or None
+        :return: List of dictionaries (empty list if no rows)
+        :raises DatabaseError: If not connected or query fails
         """
-        try:
-            if not self.conn:
-                self.last_error = "Not connected to database"
-                return None
+        if not self.conn:
+            raise DatabaseError("Not connected to database")
 
+        try:
             with self.conn.cursor(row_factory=dict_row) as cur:
                 if params:
                     cur.execute(sql, params)
                 else:
                     cur.execute(sql)
-                return cur.fetchall()
+                rows = cur.fetchall()
+                return rows if rows is not None else []
 
+        except DatabaseError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Query error: {e}\nSQL: {sql}")
-            return None
+            raise DatabaseError(f"Query error: {e}\nSQL: {sql}") from e
 
     def clone(self) -> "HePgDao":
         """
@@ -372,7 +393,7 @@ class HeSqliteDao(HeDbDao):
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"SQLite connection error: {e}")
-            return False
+            raise DatabaseError(f"SQLite connection error: {e}") from e
 
     def close_db(self) -> None:
         """Close the database connection."""
@@ -387,6 +408,7 @@ class HeSqliteDao(HeDbDao):
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Error closing SQLite connection: {e}")
+            raise DatabaseError(f"Error closing SQLite connection: {e}") from e
 
     def execute(self, sql: str, params: Optional[tuple] = None, commit: bool = True) -> bool:
         """
@@ -396,12 +418,12 @@ class HeSqliteDao(HeDbDao):
         :param params: Query parameters
         :param commit: Whether to commit after execution
         :return: True if execution successful
+        :raises DatabaseError: If not connected or execution fails
         """
-        try:
-            if not self.conn or not self.cursor:
-                self.last_error = "Not connected to database"
-                return False
+        if not self.conn or not self.cursor:
+            raise DatabaseError("Not connected to database")
 
+        try:
             if params:
                 self.cursor.execute(sql, params)
             else:
@@ -412,11 +434,16 @@ class HeSqliteDao(HeDbDao):
 
             return True
 
+        except DatabaseError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Execute error: {e}\nSQL: {sql}")
-            self.rollback()
-            return False
+            try:
+                self.rollback()
+            except DatabaseError:
+                pass
+            raise DatabaseError(f"Execute error: {e}\nSQL: {sql}") from e
 
     def get_rows(self, sql: str, params: Optional[tuple] = None) -> Optional[List[tuple]]:
         """
@@ -424,24 +451,27 @@ class HeSqliteDao(HeDbDao):
 
         :param sql: SQL query
         :param params: Query parameters
-        :return: List of rows or None
+        :return: List of rows (empty list if no rows)
+        :raises DatabaseError: If not connected or query fails
         """
-        try:
-            if not self.conn or not self.cursor:
-                self.last_error = "Not connected to database"
-                return None
+        if not self.conn or not self.cursor:
+            raise DatabaseError("Not connected to database")
 
+        try:
             if params:
                 self.cursor.execute(sql, params)
             else:
                 self.cursor.execute(sql)
 
-            return self.cursor.fetchall()
+            rows = self.cursor.fetchall()
+            return rows if rows is not None else []
 
+        except DatabaseError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Query error: {e}\nSQL: {sql}")
-            return None
+            raise DatabaseError(f"Query error: {e}\nSQL: {sql}") from e
 
     def get_row(self, sql: str, params: Optional[tuple] = None) -> Optional[tuple]:
         """
@@ -449,13 +479,13 @@ class HeSqliteDao(HeDbDao):
 
         :param sql: SQL query
         :param params: Query parameters
-        :return: First row or None
+        :return: First row or None if no row matches
+        :raises DatabaseError: If not connected or query fails
         """
-        try:
-            if not self.conn or not self.cursor:
-                self.last_error = "Not connected to database"
-                return None
+        if not self.conn or not self.cursor:
+            raise DatabaseError("Not connected to database")
 
+        try:
             if params:
                 self.cursor.execute(sql, params)
             else:
@@ -463,10 +493,12 @@ class HeSqliteDao(HeDbDao):
 
             return self.cursor.fetchone()
 
+        except DatabaseError:
+            raise
         except Exception as e:
             self.last_error = str(e)
             tools_log.log_error(f"Query error: {e}\nSQL: {sql}")
-            return None
+            raise DatabaseError(f"Query error: {e}\nSQL: {sql}") from e
 
     def clone(self) -> "HeSqliteDao":
         """
@@ -521,23 +553,21 @@ class HeGpkgDao(HeSqliteDao):
             new_dao.connect(self.db_path)
         return new_dao
 
-    def get_tables(self) -> Optional[List[str]]:
+    def get_tables(self) -> List[str]:
         """
         Get list of tables in the GeoPackage.
 
-        :return: List of table names or None
+        :return: List of table names (empty list if none)
         """
         sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'gpkg_%' AND name NOT LIKE 'sqlite_%'"
         rows = self.get_rows(sql)
-        if rows:
-            return [row[0] for row in rows]
-        return None
+        return [row[0] for row in rows] if rows else []
 
-    def get_geometry_tables(self) -> Optional[List[Dict[str, Any]]]:
+    def get_geometry_tables(self) -> List[Dict[str, Any]]:
         """
         Get list of geometry tables from gpkg_contents.
 
-        :return: List of geometry table info or None
+        :return: List of geometry table info (empty list if none)
         """
         sql = """
             SELECT table_name, data_type, identifier, description, srs_id 
@@ -545,18 +575,18 @@ class HeGpkgDao(HeSqliteDao):
             WHERE data_type IN ('features', 'tiles')
         """
         rows = self.get_rows(sql)
-        if rows:
-            return [
-                {
-                    "table_name": row[0],
-                    "data_type": row[1],
-                    "identifier": row[2],
-                    "description": row[3],
-                    "srs_id": row[4]
-                }
-                for row in rows
-            ]
-        return None
+        if not rows:
+            return []
+        return [
+            {
+                "table_name": row[0],
+                "data_type": row[1],
+                "identifier": row[2],
+                "description": row[3],
+                "srs_id": row[4]
+            }
+            for row in rows
+        ]
 
 
 # =============================================================================
@@ -588,14 +618,12 @@ def create_pg_connection(
     from ..config import config
 
     dao = HePgDao()
-    if dao.connect(host=host, port=port, dbname=dbname, user=user, password=password, schema=schema, **kwargs):
-        if set_as_default:
-            # Close existing connection if any
-            if config.session_vars.get('db_connection'):
-                config.session_vars['db_connection'].close_db()
-            config.session_vars['db_connection'] = dao
-        return dao
-    return None
+    dao.connect(host=host, port=port, dbname=dbname, user=user, password=password, schema=schema, **kwargs)
+    if set_as_default:
+        if config.session_vars.get('db_connection'):
+            config.session_vars['db_connection'].close_db()
+        config.session_vars['db_connection'] = dao
+    return dao
 
 
 def create_gpkg_connection(
@@ -613,14 +641,12 @@ def create_gpkg_connection(
     from ..config import config
 
     dao = HeGpkgDao()
-    if dao.connect(gpkg_path, **kwargs):
-        if set_as_default:
-            # Close existing connection if any
-            if config.session_vars.get('db_connection'):
-                config.session_vars['db_connection'].close_db()
-            config.session_vars['db_connection'] = dao
-        return dao
-    return None
+    dao.connect(gpkg_path, **kwargs)
+    if set_as_default:
+        if config.session_vars.get('db_connection'):
+            config.session_vars['db_connection'].close_db()
+        config.session_vars['db_connection'] = dao
+    return dao
 
 
 def create_sqlite_connection(
@@ -638,14 +664,12 @@ def create_sqlite_connection(
     from ..config import config
 
     dao = HeSqliteDao()
-    if dao.connect(db_path, **kwargs):
-        if set_as_default:
-            # Close existing connection if any
-            if config.session_vars.get('db_connection'):
-                config.session_vars['db_connection'].close_db()
-            config.session_vars['db_connection'] = dao
-        return dao
-    return None
+    dao.connect(db_path, **kwargs)
+    if set_as_default:
+        if config.session_vars.get('db_connection'):
+            config.session_vars['db_connection'].close_db()
+        config.session_vars['db_connection'] = dao
+    return dao
 
 
 def get_connection() -> Optional[HeDbDao]:
