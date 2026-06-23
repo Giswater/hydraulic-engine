@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-23
+
+### Fixed
+
+- Add no-op `__post_init__` on `EpanetBaseObject` so `EpanetPipe` partial construction (e.g. `EpanetPipe(roughness=...)`) no longer raises `AttributeError` on `super().__post_init__()`.
+
 ## [0.4.0] - 2026-05-25
 
 ### Added

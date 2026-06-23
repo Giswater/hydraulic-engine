@@ -40,6 +40,9 @@ class EpanetBaseObject:
     """
     tag: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        pass
+
 
 # endregion
 
