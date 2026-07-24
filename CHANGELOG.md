@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-24
+
 ### Added
 
 - Add `only_extrema` parameter to `EpanetBinHandler.export_to_database` to skip time series inserts and only export aggregated stats.
@@ -81,7 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support for batch operations to efficiently create/update Things, Datastreams, and Observations
   - Integration with existing export framework (`ExportDataSource.FROST`)
 
-[unreleased]: https://github.com/Giswater/hydraulic_engine/compare/v0.4.1...main
+[unreleased]: https://github.com/Giswater/hydraulic_engine/compare/v0.5.0...main
+[0.5.0]: https://github.com/Giswater/hydraulic_engine/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Giswater/hydraulic_engine/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Giswater/hydraulic_engine/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/Giswater/hydraulic_engine/compare/v0.3.1...0.3.2
