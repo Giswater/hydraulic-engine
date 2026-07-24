@@ -7,7 +7,7 @@ or (at your option) any later version.
 # -*- coding: utf-8 -*-
 import wntr
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from pyproj import Transformer
 from datetime import timedelta
@@ -50,7 +50,8 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             inp_handler: EpanetInpHandler,
             round_decimals: int = 2,
             dao: Optional[HePgDao] = None,
-            giswater_version: int = 4
+            giswater_version: int = 4,
+            only_extrema: bool = False
         ) -> bool:
         """
         Export simulation results to Giswater database.
@@ -72,6 +73,7 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
         :param round_decimals: Number of decimal places to round the results (default: 2)
         :param dao: Database access object (optional, uses global connection if not provided)
         :param giswater_version: Version of Giswater (default: 4)
+        :param only_extrema: If True, skip time series inserts and only export aggregated stats
         :return: True if export successful, False otherwise
         """
         if not self.is_loaded():
@@ -91,30 +93,31 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             tools_log.log_info("Cleaning previous results...")
             _clean_previous_results(dao, result_id, giswater_version)
 
-            # Step 2: Insert time series data into rpt_node
-            tools_log.log_info("Inserting node results...")
-            node_count = _insert_node_results(dao, results, result_id, inp_handler, round_decimals, giswater_version)
-            tools_log.log_info(f"Inserted {node_count} node result records")
+            tools_log.log_info("Building node and arc data...")
+            node_data = _build_node_data(results, inp_handler, round_decimals)
+            arc_data = _build_arc_data(results, inp_handler, round_decimals)
 
-            # Step 3: Insert time series data into rpt_arc
-            tools_log.log_info("Inserting arc results...")
-            arc_count = _insert_arc_results(dao, results, result_id, inp_handler, round_decimals)
-            tools_log.log_info(f"Inserted {arc_count} arc result records")
+            if not only_extrema:
+                tools_log.log_info("Inserting node results...")
+                node_count = _insert_node_results(dao, node_data, result_id, giswater_version)
+                tools_log.log_info(f"Inserted {node_count} node result records")
 
-            # Step 4: Post-process arcs (reverse geometry for negative flows)
-            tools_log.log_info("Post-processing arc results...")
-            _post_process_arcs(dao, result_id)
+                tools_log.log_info("Inserting arc results...")
+                arc_count = _insert_arc_results(dao, arc_data, result_id)
+                tools_log.log_info(f"Inserted {arc_count} arc result records")
+
+                tools_log.log_info("Post-processing arc results...")
+                _post_process_arcs(dao, result_id)
+            else:
+                tools_log.log_info("Skipping time series inserts (only_extrema=True)")
 
             if giswater_version > 3:
-                # Step 5: Calculate and insert node statistics
                 tools_log.log_info("Calculating node statistics...")
-                _insert_node_stats(dao, result_id)
+                _insert_node_stats(dao, result_id, node_data, round_decimals, giswater_version)
 
-                # Step 6: Calculate and insert arc statistics
                 tools_log.log_info("Calculating arc statistics...")
-                _insert_arc_stats(dao, result_id)
+                _insert_arc_stats(dao, result_id, arc_data, round_decimals)
 
-            # Step 8: Update rpt_cat_result and selectors
             tools_log.log_info("Updating result catalog and selectors...")
             _finalize_import(dao, result_id, giswater_version)
 
@@ -304,20 +307,14 @@ def _clean_previous_results(dao: HePgDao, result_id: str, giswater_version: int 
             raise DatabaseError(f"Failed to clean {table}") from e
 
 
-def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, result_id: str, inp_handler: EpanetInpHandler, round_decimals: int = 2, giswater_version: int = 4) -> int:
+def _build_node_data(
+    results: wntr.sim.SimulationResults,
+    inp_handler: EpanetInpHandler,
+    round_decimals: int = 2
+) -> List[Dict[str, Any]]:
     """
-    Insert time series node results into rpt_node table.
-    
-    :param dao: Database access object
-    :param results: WNTR SimulationResults object
-    :param result_id: Result identifier
-    :param inp_handler: INP handler to get node values
-    :param round_decimals: Number of decimal places to round the results (default: 2)
-    :return: Number of records inserted
+    Build converted node time-series data once for reuse in inserts and stats.
     """
-    count = 0
-
-    # Get unit system
     unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
     if unit_system is None:
         tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
@@ -335,9 +332,10 @@ def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, resu
     demand_df = node_data['demand']
     node_ids = demand_df.columns.tolist()
     time_steps = demand_df.index.tolist()
+    if time_steps is None or len(time_steps) == 0:
+        raise SimulationError("No time steps found in results")
 
-    # Prepare data for bulk insert
-    records = []
+    records: List[Dict[str, Any]] = []
     for time_sec in time_steps:
         time_str = _seconds_to_time_str(int(time_sec))
         for node_id in node_ids:
@@ -367,16 +365,47 @@ def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, resu
             ) if 'pressure' in node_data else None
             quality = round(float(node_data['quality'].loc[time_sec, node_id]), round_decimals) if 'quality' in node_data else None
 
-            records.append((result_id, node_id, time_str, top_elev, demand, head, pressure, quality))
+            records.append({
+                'node_id': node_id,
+                'time': time_str,
+                'top_elev': top_elev,
+                'demand': demand,
+                'head': head,
+                'press': pressure,
+                'quality': quality
+            })
+
+    return records
+
+
+def _insert_node_results(
+    dao: HePgDao,
+    node_data: List[Dict[str, Any]],
+    result_id: str,
+    giswater_version: int = 4
+) -> int:
+    """
+    Insert time series node results into rpt_node table.
+    
+    :param dao: Database access object
+    :param node_data: List of node data
+    :param result_id: Result identifier
+    :param giswater_version: Version of Giswater (default: 4)
+    :return: Number of records inserted
+    """
+    records = [
+        (result_id, row['node_id'], row['time'], row['top_elev'], row['demand'], row['head'], row['press'], row['quality'])
+        for row in node_data
+    ]
 
     elevation_column = 'elevation' if giswater_version == 3 else 'top_elev'
 
-    # Bulk insert using executemany
     sql = f"""
         INSERT INTO rpt_node (result_id, node_id, time, {elevation_column}, demand, head, press, quality)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
 
+    count = 0
     if dao.cursor:
         dao.cursor.executemany(sql, records)
         count = len(records)
@@ -384,20 +413,14 @@ def _insert_node_results(dao: HePgDao, results: wntr.sim.SimulationResults, resu
     return count
 
 
-def _insert_arc_results(dao: HePgDao, results: wntr.sim.SimulationResults, result_id: str, inp_handler: EpanetInpHandler, round_decimals: int = 2) -> int:
+def _build_arc_data(
+    results: wntr.sim.SimulationResults,
+    inp_handler: EpanetInpHandler,
+    round_decimals: int = 2
+) -> List[Dict[str, Any]]:
     """
-    Insert time series arc results into rpt_arc table.
-    
-    :param dao: Database access object
-    :param results: WNTR SimulationResults object
-    :param result_id: Result identifier
-    :param inp_handler: INP handler to get link values
-    :param round_decimals: Number of decimal places to round the results (default: 2)
-    :return: Number of records inserted
+    Build converted arc time-series data once for reuse in inserts and stats.
     """
-    count = 0
-
-    # Get unit system
     unit_system = getattr(wntr.epanet.util.FlowUnits, inp_handler.file_object.options.hydraulic.inpfile_units)
     if unit_system is None:
         tools_log.log_error(f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}")
@@ -405,12 +428,10 @@ def _insert_arc_results(dao: HePgDao, results: wntr.sim.SimulationResults, resul
             f"Invalid unit system: {inp_handler.file_object.options.hydraulic.inpfile_units}"
         )
 
-    # Get available link result types
     link_data = results.link
     if link_data is None:
         raise SimulationError("No link data found in results")
 
-    # Get all link IDs from flowrate (always present)
     if 'flowrate' not in link_data:
         tools_log.log_warning("No flowrate data found in results")
         raise SimulationError("No flowrate data found in results")
@@ -418,9 +439,10 @@ def _insert_arc_results(dao: HePgDao, results: wntr.sim.SimulationResults, resul
     flow_df = link_data['flowrate']
     link_ids = flow_df.columns.tolist()
     time_steps = flow_df.index.tolist()
+    if time_steps is None or len(time_steps) == 0:
+        raise SimulationError("No time steps found in results")
 
-    # Prepare data for bulk insert
-    records = []
+    records: List[Dict[str, Any]] = []
     for time_sec in time_steps:
         time_str = _seconds_to_time_str(int(time_sec))
         for link_id in link_ids:
@@ -458,21 +480,62 @@ def _insert_arc_results(dao: HePgDao, results: wntr.sim.SimulationResults, resul
             reaction = round(float(link_data['reaction_rate'].loc[time_sec, link_id]), round_decimals) if 'reaction_rate' in link_data else None
             ffactor = round(float(link_data['friction_factor'].loc[time_sec, link_id]), round_decimals) if 'friction_factor' in link_data else None
 
-            # Get status as text
             status = None
             if 'status' in link_data:
                 status_val = int(link_data['status'].loc[time_sec, link_id])
                 status_map = {0: 'CLOSED', 1: 'OPEN', 2: 'ACTIVE'}
                 status = status_map.get(status_val, str(status_val))
 
-            records.append((result_id, link_id, time_str, length, diameter, flow, velocity, headloss, setting, reaction, ffactor, status))
+            records.append({
+                'arc_id': link_id,
+                'time': time_str,
+                'length': length,
+                'diameter': diameter,
+                'flow': flow,
+                'vel': velocity,
+                'headloss': headloss,
+                'setting': setting,
+                'reaction': reaction,
+                'ffactor': ffactor,
+                'status': status
+            })
 
-    # Bulk insert using executemany
+    return records
+
+
+def _insert_arc_results(dao: HePgDao, arc_data: List[Dict[str, Any]], result_id: str) -> int:
+    """
+    Insert time series arc results into rpt_arc table.
+    
+    :param dao: Database access object
+    :param arc_data: List of arc data
+    :param result_id: Result identifier
+    :return: Number of records inserted
+    """
+    records = [
+        (
+            result_id,
+            row['arc_id'],
+            row['time'],
+            row['length'],
+            row['diameter'],
+            row['flow'],
+            row['vel'],
+            row['headloss'],
+            row['setting'],
+            row['reaction'],
+            row['ffactor'],
+            row['status']
+        )
+        for row in arc_data
+    ]
+
     sql = """
         INSERT INTO rpt_arc (result_id, arc_id, time, length, diameter, flow, vel, headloss, setting, reaction, ffactor, status)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
+    count = 0
     if dao.cursor:
         dao.cursor.executemany(sql, records)
         count = len(records)
@@ -510,107 +573,185 @@ def _post_process_arcs(dao: HePgDao, result_id: str) -> None:
     dao.execute(sql_abs_flow, (result_id,), commit=False)
 
 
-def _insert_node_stats(dao: HePgDao, result_id: str) -> None:
+def _metric_stats(
+    values: List[Tuple[float, str]],
+    round_decimals: int
+) -> tuple[Optional[float], Optional[str], Optional[float], Optional[str], Optional[float]]:
+    """Return max, t_max, min, t_min and avg for a metric series."""
+    if not values:
+        return None, None, None, None, None
+    max_value, max_time = max(values, key=lambda item: item[0])
+    min_value, min_time = min(values, key=lambda item: item[0])
+    avg_value = round(sum(value for value, _ in values) / len(values), round_decimals)
+    return max_value, max_time, min_value, min_time, avg_value
+
+
+def _insert_node_stats(
+    dao: HePgDao,
+    result_id: str,
+    node_data: List[Dict[str, Any]],
+    round_decimals: int = 2,
+    giswater_version: int = 4
+) -> None:
     """
     Calculate and insert node statistics into rpt_node_stats table.
     
-    Statistics are calculated by aggregating rpt_node values and joining
+    Statistics are calculated from in-memory node time-series data and joined
     with rpt_inp_node for metadata and geometry.
     
     :param dao: Database access object
     :param result_id: Result identifier
+    :param node_data: Converted node time-series records
+    :param round_decimals: Number of decimal places for averages
+    :param giswater_version: Version of Giswater (default: 4)
     """
-    sql = """
+    grouped: Dict[str, Dict[str, List[Tuple[float, str]]]] = {}
+
+    for row in node_data:
+        node_id = row['node_id']
+        if node_id not in grouped:
+            grouped[node_id] = {'demand': [], 'head': [], 'press': [], 'quality': []}
+
+        for metric in ('demand', 'head', 'press', 'quality'):
+            value = row[metric]
+            if value is not None:
+                grouped[node_id][metric].append((value, row['time']))
+
+    elevation_column = 'elevation' if giswater_version == 3 else 'top_elev'
+
+    sql = f"""
         INSERT INTO rpt_node_stats (
-            node_id, result_id, node_type, sector_id, nodecat_id, top_elev,
-            demand_max, demand_min, demand_avg,
-            head_max, head_min, head_avg,
-            press_max, press_min, press_avg,
-            quality_max, quality_min, quality_avg,
+            node_id, result_id, node_type, sector_id, nodecat_id, {elevation_column},
+            demand_max, demand_min, demand_avg, t_demand_max, t_demand_min,
+            head_max, head_min, head_avg, t_head_max, t_head_min,
+            press_max, press_min, press_avg, t_press_max, t_press_min,
+            quality_max, quality_min, quality_avg, t_quality_max, t_quality_min,
             the_geom
         )
-        SELECT 
-            node.node_id,
-            %s as result_id,
-            node.node_type,
-            node.sector_id,
-            node.nodecat_id,
-            MAX(rpt.head) as top_elev,
-            MAX(rpt.demand) AS demand_max,
-            MIN(rpt.demand) AS demand_min,
-            AVG(rpt.demand)::numeric(12,2) AS demand_avg,
-            MAX(rpt.head) AS head_max,
-            MIN(rpt.head) AS head_min,
-            AVG(rpt.head)::numeric(12,2) AS head_avg,
-            MAX(rpt.press) AS press_max,
-            MIN(rpt.press) AS press_min,
-            AVG(rpt.press)::numeric(12,2) AS press_avg,
-            MAX(rpt.quality) AS quality_max,
-            MIN(rpt.quality) AS quality_min,
-            AVG(rpt.quality)::numeric(12,2) AS quality_avg,
+        SELECT
+            node.node_id, %s, node.node_type, node.sector_id, node.nodecat_id, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
             node.the_geom
         FROM rpt_inp_node node
-        JOIN rpt_node rpt ON rpt.node_id::text = node.node_id::text
-        WHERE node.result_id = %s AND rpt.result_id = %s
-        GROUP BY node.node_id, node.node_type, node.sector_id, node.nodecat_id, node.the_geom
-        ORDER BY node.node_id
+        WHERE node.result_id = %s AND node.node_id::text = %s
     """
-    dao.execute(sql, (result_id, result_id, result_id), commit=False)
+
+    records = []
+    for node_id, values in grouped.items():
+        demand_max, demand_max_time, demand_min, demand_min_time, demand_avg = _metric_stats(values['demand'], round_decimals)
+        head_max, head_max_time, head_min, head_min_time, head_avg = _metric_stats(values['head'], round_decimals)
+        press_max, press_max_time, press_min, press_min_time, press_avg = _metric_stats(values['press'], round_decimals)
+        quality_max, quality_max_time, quality_min, quality_min_time, quality_avg = _metric_stats(values['quality'], round_decimals)
+        elevation = head_max
+
+        records.append((
+            result_id, elevation,
+            demand_max, demand_min, demand_avg, demand_max_time, demand_min_time,
+            head_max, head_min, head_avg, head_max_time, head_min_time,
+            press_max, press_min, press_avg, press_max_time, press_min_time,
+            quality_max, quality_min, quality_avg, quality_max_time, quality_min_time,
+            result_id, node_id
+        ))
+
+    if dao.cursor and records:
+        dao.cursor.executemany(sql, records)
+        if dao.cursor.rowcount == 0:
+            raise ExportError("No rows inserted into rpt_node_stats")
 
 
-def _insert_arc_stats(dao: HePgDao, result_id: str) -> None:
+def _insert_arc_stats(
+    dao: HePgDao,
+    result_id: str,
+    arc_data: List[Dict[str, Any]],
+    round_decimals: int = 2
+) -> None:
     """
     Calculate and insert arc statistics into rpt_arc_stats table.
     
-    Statistics are calculated by aggregating rpt_arc values and joining
+    Statistics are calculated from in-memory arc time-series data and joined
     with rpt_inp_arc for metadata and geometry.
     
     :param dao: Database access object
     :param result_id: Result identifier
+    :param arc_data: Converted arc time-series records
+    :param round_decimals: Number of decimal places for averages
     """
+    grouped: Dict[str, Dict[str, List[Tuple[float, str]]]] = {}
+    length_map: Dict[str, Optional[float]] = {}
+
+    for row in arc_data:
+        arc_id = row['arc_id']
+        if arc_id not in grouped:
+            grouped[arc_id] = {'flow': [], 'vel': [], 'headloss': [], 'setting': [], 'reaction': [], 'ffactor': []}
+            length_map[arc_id] = row['length']
+
+        for metric in ('flow', 'vel', 'headloss', 'setting', 'reaction', 'ffactor'):
+            value = row[metric]
+            if value is not None:
+                time_value = row['time']
+                if metric == 'flow':
+                    grouped[arc_id][metric].append((abs(value), time_value))
+                else:
+                    grouped[arc_id][metric].append((value, time_value))
+
     sql = """
         INSERT INTO rpt_arc_stats (
             arc_id, result_id, arc_type, sector_id, arccat_id,
-            flow_max, flow_min, flow_avg,
-            vel_max, vel_min, vel_avg,
-            headloss_max, headloss_min,
-            setting_max, setting_min,
-            reaction_max, reaction_min,
-            ffactor_max, ffactor_min,
+            flow_max, flow_min, flow_avg, t_flow_max, t_flow_min,
+            vel_max, vel_min, vel_avg, t_vel_max, t_vel_min,
+            headloss_max, headloss_min, t_headloss_max, t_headloss_min,
+            setting_max, setting_min, t_setting_max, t_setting_min,
+            reaction_max, reaction_min, t_reaction_max, t_reaction_min,
+            ffactor_max, ffactor_min, t_ffactor_max, t_ffactor_min,
             length, tot_headloss_max, tot_headloss_min,
             the_geom
         )
-        SELECT 
-            arc.arc_id,
-            %s as result_id,
-            arc.arc_type,
-            arc.sector_id,
-            arc.arccat_id,
-            MAX(rpt.flow) AS flow_max,
-            MIN(rpt.flow) AS flow_min,
-            AVG(rpt.flow)::numeric(12,2) AS flow_avg,
-            MAX(rpt.vel) AS vel_max,
-            MIN(rpt.vel) AS vel_min,
-            AVG(rpt.vel)::numeric(12,2) AS vel_avg,
-            MAX(rpt.headloss) AS headloss_max,
-            MIN(rpt.headloss) AS headloss_min,
-            MAX(rpt.setting) AS setting_max,
-            MIN(rpt.setting) AS setting_min,
-            MAX(rpt.reaction) AS reaction_max,
-            MIN(rpt.reaction) AS reaction_min,
-            MAX(rpt.ffactor) AS ffactor_max,
-            MIN(rpt.ffactor) AS ffactor_min,
-            arc.length,
-            (MAX(rpt.headloss) * arc.length / 1000)::numeric(12, 2) AS tot_headloss_max,
-            (MIN(rpt.headloss) * arc.length / 1000)::numeric(12, 2) AS tot_headloss_min,
+        SELECT
+            arc.arc_id, %s, arc.arc_type, arc.sector_id, arc.arccat_id,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s,
+            %s, %s, %s, %s,
+            %s, %s, %s, %s,
+            %s, %s, %s, %s,
+            %s, %s, %s,
             arc.the_geom
         FROM rpt_inp_arc arc
-        JOIN rpt_arc rpt ON rpt.arc_id::text = arc.arc_id::text
-        WHERE arc.result_id = %s AND rpt.result_id = %s
-        GROUP BY arc.arc_id, arc.arc_type, arc.sector_id, arc.arccat_id, arc.length, arc.the_geom
-        ORDER BY arc.arc_id
+        WHERE arc.result_id = %s AND arc.arc_id::text = %s
     """
-    dao.execute(sql, (result_id, result_id, result_id), commit=False)
+
+    records = []
+    for arc_id, values in grouped.items():
+        flow_max, flow_max_time, flow_min, flow_min_time, flow_avg = _metric_stats(values['flow'], round_decimals)
+        vel_max, vel_max_time, vel_min, vel_min_time, vel_avg = _metric_stats(values['vel'], round_decimals)
+        headloss_max, headloss_max_time, headloss_min, headloss_min_time, _ = _metric_stats(values['headloss'], round_decimals)
+        setting_max, setting_max_time, setting_min, setting_min_time, _ = _metric_stats(values['setting'], round_decimals)
+        reaction_max, reaction_max_time, reaction_min, reaction_min_time, _ = _metric_stats(values['reaction'], round_decimals)
+        ffactor_max, ffactor_max_time, ffactor_min, ffactor_min_time, _ = _metric_stats(values['ffactor'], round_decimals)
+        length = length_map[arc_id]
+
+        tot_headloss_max = None if headloss_max is None or length is None else round(headloss_max * length / 1000, round_decimals)
+        tot_headloss_min = None if headloss_min is None or length is None else round(headloss_min * length / 1000, round_decimals)
+
+        records.append((
+            result_id,
+            flow_max, flow_min, flow_avg, flow_max_time, flow_min_time,
+            vel_max, vel_min, vel_avg, vel_max_time, vel_min_time,
+            headloss_max, headloss_min, headloss_max_time, headloss_min_time,
+            setting_max, setting_min, setting_max_time, setting_min_time,
+            reaction_max, reaction_min, reaction_max_time, reaction_min_time,
+            ffactor_max, ffactor_min, ffactor_max_time, ffactor_min_time,
+            length, tot_headloss_max, tot_headloss_min,
+            result_id, arc_id
+        ))
+
+    if dao.cursor and records:
+        dao.cursor.executemany(sql, records)
+        if dao.cursor.rowcount == 0:
+            raise ExportError("No rows inserted into rpt_arc_stats")
 
 
 def _finalize_import(dao: HePgDao, result_id: str, giswater_version: int = 4) -> None:

@@ -43,10 +43,10 @@ class EpanetRunResult:
 class EpanetRunner:
     """
     Class for running EPANET simulations.
-    
+
     Uses WNTR (Water Network Tool for Resilience) library.
-    
-    Example usage: 
+
+    Example usage:
         # Run simulation
         runner = EpanetRunner(
             inp_path="model.inp",
@@ -118,7 +118,7 @@ class EpanetRunner:
     ) -> EpanetRunResult:
         """
         Run EPANET simulation.
-        
+
         :param feature_settings: Feature settings for the simulation (junctions, pipes, etc.)
         :param options_settings: Options settings for the simulation (time, hydraulics, etc.)
         :param other_settings: Other settings for the simulation (patterns, curves, etc.)
@@ -172,7 +172,7 @@ class EpanetRunner:
     ) -> EpanetRunResult:
         """
         Run the EPANET simulation step-by-step using the EPANET toolkit.
-        
+
         :param result: Object to populate with results (like a status or log).
         :param step_callback: Optional callback for user control of simulation steps.
         :param calculate_water_quality: Whether to run water quality simulation
@@ -265,7 +265,7 @@ class EpanetRunner:
     ) -> int:
         """
         Run the hydraulic simulation step-by-step using the EPANET toolkit.
-        
+
         :param enData: EPANET project handle
         :param duration: Simulation duration in seconds
         :param step_callback: Callback function to track simulation progress
@@ -334,7 +334,7 @@ class EpanetRunner:
     def _run_water_quality_simulation(self, enData: toolkit.ENepanet) -> None:
         """
         Run the water quality simulation step-by-step using the EPANET toolkit.
-        
+
         :param enData: EPANET project handle
         """
         enData.ENopenQ()
@@ -351,7 +351,7 @@ class EpanetRunner:
     def _parse_rpt_status(self, result: EpanetRunResult) -> None:
         """
         Parse RPT file for errors and warnings.
-        
+
         :param result: EpanetRunResult to update
         """
         try:
@@ -404,14 +404,22 @@ class EpanetRunner:
             start_time: Optional[datetime] = None,
             round_decimals: int = 2,
             client: Optional[HeFrostClient] = None,
-            giswater_version: int = 4
+            giswater_version: int = 4,
+            only_extrema: bool = False
         ) -> bool:
         """
         Export the result file to a specific datasource
         """
 
         if to == ExportDataSource.DATABASE:
-            return self.bin.export_to_database(result_id=result_id, inp_handler=self.inp, round_decimals=round_decimals, dao=client, giswater_version=giswater_version)
+            return self.bin.export_to_database(
+                result_id=result_id,
+                inp_handler=self.inp,
+                round_decimals=round_decimals,
+                dao=client,
+                giswater_version=giswater_version,
+                only_extrema=only_extrema
+            )
         elif to == ExportDataSource.FROST:
             return self.bin.export_to_frost(
                 inp_handler=self.inp,
