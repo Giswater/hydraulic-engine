@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-27
+
 ### Added
 
 - Add cooperative simulation abort via `step_callback`: `RunStatus.CANCELLED`, `SimulationCancelled`, and full early exit in EPANET (hydraulics + water quality) and SWMM runners when the callback returns `False`.
@@ -91,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support for batch operations to efficiently create/update Things, Datastreams, and Observations
   - Integration with existing export framework (`ExportDataSource.FROST`)
 
-[unreleased]: https://github.com/Giswater/hydraulic_engine/compare/v0.5.0...main
+[unreleased]: https://github.com/Giswater/hydraulic_engine/compare/v0.6.0...main
+[0.6.0]: https://github.com/Giswater/hydraulic_engine/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Giswater/hydraulic_engine/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Giswater/hydraulic_engine/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Giswater/hydraulic_engine/compare/v0.3.2...v0.4.0
