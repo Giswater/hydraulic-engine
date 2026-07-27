@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Refactor `EpanetBinHandler.export_to_database` for large networks: vectorized unit conversion, PostgreSQL `COPY` streaming, vectorized stats, staging-table inserts, and a faster `only_extrema` path.
+
 ## [0.5.0] - 2026-07-24
 
 ### Added
