@@ -42,3 +42,7 @@ class ExportError(HydraulicEngineError):
 
 class SimulationError(HydraulicEngineError):
     """Raised when a hydraulic simulation fails."""
+
+
+class SimulationCancelled(HydraulicEngineError):
+    """Raised when a simulation is stopped by the step callback."""

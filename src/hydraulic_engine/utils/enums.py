@@ -14,6 +14,7 @@ class RunStatus(Enum):
     WARNING = "warning"
     ERROR = "error"
     NOT_RUN = "not_run"
+    CANCELLED = "cancelled"
 
 
 class ExportDataSource(Enum):

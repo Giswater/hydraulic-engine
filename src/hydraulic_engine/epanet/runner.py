@@ -122,7 +122,8 @@ class EpanetRunner:
         :param feature_settings: Feature settings for the simulation (junctions, pipes, etc.)
         :param options_settings: Options settings for the simulation (time, hydraulics, etc.)
         :param other_settings: Other settings for the simulation (patterns, curves, etc.)
-        :param step_callback: Callback function to track simulation progress
+        :param step_callback: After each step. Return True to continue, False to abort.
+            None return is treated as continue.
         :param calculate_water_quality: Whether to run water quality simulation
         :return: EpanetRunResult with simulation results
         """
@@ -174,10 +175,12 @@ class EpanetRunner:
         Run the EPANET simulation step-by-step using the EPANET toolkit.
 
         :param result: Object to populate with results (like a status or log).
-        :param step_callback: Optional callback for user control of simulation steps.
+        :param step_callback: After each step. Return True to continue, False to abort.
+            None return is treated as continue.
         :param calculate_water_quality: Whether to run water quality simulation
         :return: Updated result with status and duration.
         """
+        from ..exceptions import SimulationCancelled
 
         start_time = time.time()
         enData = None
@@ -202,7 +205,7 @@ class EpanetRunner:
             # ========== Water Quality Simulation ==========
             if calculate_water_quality:
                 self._report_progress(85, "Running water quality simulation...")
-                self._run_water_quality_simulation(enData)
+                self._run_water_quality_simulation(enData, step_callback)
 
             # Close simulation
             enData.ENreport()
@@ -240,13 +243,17 @@ class EpanetRunner:
             self._report_progress(100, f"Simulation finished: {result.status.value}")
             tools_log.log_info(f"EPANET simulation completed: {result.status.value} "
                 f"({result.duration_seconds:.2f}s, {result.routing_steps} steps)")
-
+        except SimulationCancelled as e:
+            result.status = RunStatus.CANCELLED
+            result.warnings.append(str(e))
+            result.duration_seconds = time.time() - start_time
+            self._report_progress(100, "Simulation cancelled")
+            tools_log.log_info(f"EPANET simulation cancelled: {e}")
         except Exception as e:
             result.status = RunStatus.ERROR
             result.errors.append(str(e))
             tools_log.log_error(f"EPANET simulation error: {e}")
             result.duration_seconds = time.time() - start_time
-
         finally:
             # Ensure EPANET is properly closed even on error
             if enData is not None:
@@ -271,6 +278,7 @@ class EpanetRunner:
         :param step_callback: Callback function to track simulation progress
         :return: Step count
         """
+        from ..exceptions import SimulationCancelled
 
         enData.ENopenH()
         enData.ENinitH(EN.SAVE)
@@ -280,73 +288,108 @@ class EpanetRunner:
         real_start_time = time.time()
         step_count = 0
 
-        while True:
-            current_time = enData.ENrunH()
-            step_count += 1
+        try:
+            while True:
+                current_time = enData.ENrunH()
+                step_count += 1
 
-            # Calculate progress percentage (0.0 to 1.0)
-            if duration > 0:
-                percent = min(current_time / duration, 1.0)
-            else:
-                percent = 1.0
-
-            # Map progress to 15-85% range
-            sim_progress = min(85, int(15 + percent * 70))
-
-            # Only report every 0.5 seconds to avoid flooding
-            current_real_time = time.time()
-            if sim_progress != last_progress and (current_real_time - last_report_time) >= 0.5:
-                # Calculate ETA based on elapsed time
-                elapsed_real = current_real_time - real_start_time
-                if percent > 0:
-                    estimated_total_time = elapsed_real / percent
-                    remaining_real = estimated_total_time - elapsed_real
+                # Calculate progress percentage (0.0 to 1.0)
+                if duration > 0:
+                    percent = min(current_time / duration, 1.0)
                 else:
-                    remaining_real = 0
+                    percent = 1.0
 
-                remaining_str = self._format_time(remaining_real)
-                # Convert simulation time (seconds) to readable format
-                sim_time_str = self._format_simulation_time(current_time)
+                # Map progress to 15-85% range
+                sim_progress = min(85, int(15 + percent * 70))
 
-                progress_msg = f"ETA: {remaining_str} | Simulation time: {sim_time_str}"
-                self._report_progress(sim_progress, progress_msg)
-                last_progress = sim_progress
-                last_report_time = current_real_time
+                # Only report every 0.5 seconds to avoid flooding
+                current_real_time = time.time()
+                if sim_progress != last_progress and (current_real_time - last_report_time) >= 0.5:
+                    # Calculate ETA based on elapsed time
+                    elapsed_real = current_real_time - real_start_time
+                    if percent > 0:
+                        estimated_total_time = elapsed_real / percent
+                        remaining_real = estimated_total_time - elapsed_real
+                    else:
+                        remaining_real = 0
 
-            # Call user callback if provided
-            if step_callback:
-                continue_simulation = step_callback(enData, step_count)
-                if not continue_simulation:
-                    tools_log.log_info(f"Simulation stopped by callback at step {step_count}")
+                    remaining_str = self._format_time(remaining_real)
+                    # Convert simulation time (seconds) to readable format
+                    sim_time_str = self._format_simulation_time(current_time)
+
+                    progress_msg = f"ETA: {remaining_str} | Simulation time: {sim_time_str}"
+                    self._report_progress(sim_progress, progress_msg)
+                    last_progress = sim_progress
+                    last_report_time = current_real_time
+
+                # Call user callback if provided
+                if step_callback is not None:
+                    should_continue = step_callback(enData, step_count)
+                    if should_continue is False:  # only False; None does not stop
+                        tools_log.log_info(
+                            f"Simulation stopped by callback at hydraulic step {step_count}"
+                        )
+                        raise SimulationCancelled(
+                            f"Stopped at hydraulic step {step_count}"
+                        )
+
+                # Advance to next hydraulic time step
+                time_left = enData.ENnextH()
+                if time_left <= 0:
                     break
 
-            # Advance to next hydraulic time step
-            time_left = enData.ENnextH()
-            if time_left <= 0:
-                break
+            # Save hydraulic results
+            enData.ENcloseH()
+            enData.ENsaveH()
 
-        # Save hydraulic results
-        enData.ENcloseH()
-        enData.ENsaveH()
+            return step_count
+        except SimulationCancelled:
+            try:
+                enData.ENcloseH()
+            except Exception:
+                pass
+            raise
 
-        return step_count
 
-    def _run_water_quality_simulation(self, enData: toolkit.ENepanet) -> None:
+    def _run_water_quality_simulation(self, enData: toolkit.ENepanet, step_callback: Optional[Callable[[Any, int], bool]] = None) -> None:
         """
         Run the water quality simulation step-by-step using the EPANET toolkit.
 
         :param enData: EPANET project handle
+        :param step_callback: After each step. Return True to continue, False to abort.
+            None return is treated as continue.
         """
+        from ..exceptions import SimulationCancelled
+
         enData.ENopenQ()
         enData.ENinitQ(EN.SAVE)
+        step_count = 0
 
-        while True:
-            enData.ENrunQ()
-            time_left = enData.ENnextQ()
-            if time_left <= 0:
-                break
+        try:
+            while True:
+                enData.ENrunQ()
+                step_count += 1
 
-        enData.ENcloseQ()
+                if step_callback is not None:
+                    should_continue = step_callback(enData, step_count)
+                    if should_continue is False:
+                        tools_log.log_info(
+                            f"Simulation stopped by callback at quality step {step_count}"
+                        )
+                        raise SimulationCancelled(
+                            f"Stopped at quality step {step_count}"
+                        )
+
+                if enData.ENnextQ() <= 0:
+                    break
+
+            enData.ENcloseQ()
+        except SimulationCancelled:
+            try:
+                enData.ENcloseQ()
+            except Exception:
+                pass
+            raise
 
     def _parse_rpt_status(self, result: EpanetRunResult) -> None:
         """

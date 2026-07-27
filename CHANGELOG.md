@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add cooperative simulation abort via `step_callback`: `RunStatus.CANCELLED`, `SimulationCancelled`, and full early exit in EPANET (hydraulics + water quality) and SWMM runners when the callback returns `False`.
+
 ### Changed
 
 - Refactor `EpanetBinHandler.export_to_database` for large networks: vectorized unit conversion, PostgreSQL `COPY` streaming, vectorized stats, staging-table inserts, and a faster `only_extrema` path.

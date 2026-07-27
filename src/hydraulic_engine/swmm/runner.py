@@ -19,7 +19,7 @@ from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
 from .inp_handler import SwmmInpHandler
 from ..utils import tools_log
 from ..utils.tools_api import HeFrostClient
-from ..exceptions import ValidationError, UnsupportedFileTypeError
+from ..exceptions import ValidationError, UnsupportedFileTypeError, SimulationCancelled
 
 
 @dataclass
@@ -42,10 +42,10 @@ class SwmmRunResult:
 class SwmmRunner:
     """
     Class for running SWMM simulations using pyswmm.
-    
+
     pyswmm provides direct access to the SWMM5 computational engine,
     allowing for real-time interaction and progress tracking during simulations.
-    
+
     Example usage:
         # Run simulation
         runner = SwmmRunner(
@@ -116,14 +116,15 @@ class SwmmRunner:
     ) -> SwmmRunResult:
         """
         Run SWMM simulation using pyswmm.
-        
+
         :param inp_path: Path to INP file
         :param rpt_path: Path for RPT output (optional, derived from inp_path if not provided)
         :param out_path: Path for OUT binary output (optional, derived from inp_path if not provided)
         :param feature_settings: Feature settings for the simulation
         :param options_settings: Options settings for the simulation
         :param other_settings: Other settings for the simulation
-        :param step_callback: Callback function to track simulation progress
+        :param step_callback: After each step. Return True to continue, False to abort.
+            None return is treated as continue.
         :return: SwmmRunResult with simulation results
         """
         result = SwmmRunResult()
@@ -168,9 +169,10 @@ class SwmmRunner:
     def _run_with_pyswmm(self, result: SwmmRunResult, step_callback: Optional[Callable[[Any, int], bool]] = None) -> SwmmRunResult:
         """
         Run simulation using pyswmm library.
-        
+
         :param result: SwmmRunResult object to populate
-        :param step_callback: Callback function to track simulation progress
+        :param step_callback: After each step. Return True to continue, False to abort.
+            None return is treated as continue.
         :return: Updated SwmmRunResult
         """
         import time
@@ -221,11 +223,15 @@ class SwmmRunner:
                         last_report_time = current_real_time
 
                     # Call user callback if provided
-                    if step_callback:
-                        continue_simulation = step_callback(sim, step_count)
-                        if not continue_simulation:
-                            tools_log.log_info(f"Simulation stopped by callback at step {step_count}")
-                            break
+                    if step_callback is not None:
+                        should_continue = step_callback(sim, step_count)
+                        if should_continue is False:
+                            tools_log.log_info(
+                                f"Simulation stopped by callback at step {step_count}"
+                            )
+                            raise SimulationCancelled(
+                                f"Stopped at routing step {step_count}"
+                            )
 
                 result.routing_steps = step_count
 
@@ -275,6 +281,13 @@ class SwmmRunner:
         except ImportError:
             raise
 
+        except SimulationCancelled as e:
+            result.status = RunStatus.CANCELLED
+            result.warnings.append(str(e))
+            result.duration_seconds = time.time() - start_time
+            self._report_progress(100, "Simulation cancelled")
+            tools_log.log_info(f"SWMM simulation cancelled: {e}")
+
         except Exception as e:
             result.status = RunStatus.ERROR
             result.errors.append(str(e))
@@ -286,7 +299,7 @@ class SwmmRunner:
     def _parse_rpt_status(self, result: SwmmRunResult) -> None:
         """
         Parse RPT file for errors and warnings.
-        
+
         :param result: SwmmRunResult to update
         """
         try:
