@@ -110,7 +110,7 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
                 tools_log.log_info(f"Inserted {arc_count} arc result records")
 
                 if reversed_arcs:
-                    tools_log.log_info("Reversing arc geometries for negative first-timestep flow...")
+                    tools_log.log_info("Reversing arc geometries for negative flow...")
                     _reverse_arc_geometries(dao, result_id, reversed_arcs)
             else:
                 tools_log.log_info("Skipping time series inserts (only_extrema=True)")
@@ -591,7 +591,7 @@ def _copy_arc_results(
             for a_idx, arc_id in enumerate(prepared.arc_ids):
                 flow = _df_value(prepared.flow, t_idx, a_idx)
                 if flow is not None:
-                    if t_idx == 0 and flow < 0:
+                    if flow < 0:
                         reversed_arcs.add(arc_id)
                     flow = abs(flow)
 
@@ -614,7 +614,7 @@ def _copy_arc_results(
 
 
 def _reverse_arc_geometries(dao: HePgDao, result_id: str, reversed_arcs: Set[str]) -> None:
-    """Reverse arc geometries for arcs with negative flow at the first timestep."""
+    """Reverse arc geometries for arcs with negative flow."""
     if not reversed_arcs:
         return
 
