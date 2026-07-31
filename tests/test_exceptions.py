@@ -87,12 +87,12 @@ class TestSwmmErrorHandling:
         with pytest.raises(ModelNotLoadedError):
             handler.get_errors()
 
-    def test_out_export_database_not_implemented(self):
+    def test_out_export_database_without_load_raises(self):
         from hydraulic_engine.swmm import SwmmOutHandler
 
         handler = SwmmOutHandler()
-        with pytest.raises(NotImplementedError):
-            handler.export_to_database()
+        with pytest.raises(ModelNotLoadedError):
+            handler.export_to_database(result_id="1")
 
 
 class TestUtilsErrorHandling:

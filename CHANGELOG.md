@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add SWMM export to Giswater PostgreSQL via `SwmmRunner.export_result`, `SwmmRptHandler.export_to_database`, and `SwmmOutHandler.export_to_database`.
+- Add shared SWMM export helpers in `swmm/export_db.py` (report selection, COPY streaming, clean/finalize).
+- Add `SwmmInpHandler.get_report_element_selection()` so OUT time series follow the INP `[REPORT]` NODES / LINKS / SUBCATCHMENTS settings.
+- Add SWMM and EPANET export tests.
+
+### Changed
+
+- Rewrite the README into a shorter package overview covering SWMM and EPANET run, file handling, and export.
+
 ## [0.6.0] - 2026-07-27
 
 ### Added

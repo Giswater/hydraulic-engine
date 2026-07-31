@@ -51,7 +51,7 @@ class EpanetBinHandler(EpanetFileHandler, EpanetResultHandler):
             self,
             result_id: str,
             inp_handler: EpanetInpHandler,
-            round_decimals: int = 2,
+            round_decimals: int = 4,
             dao: Optional[HePgDao] = None,
             giswater_version: int = 4,
             only_extrema: bool = False
@@ -338,7 +338,7 @@ def _convert_from_si(
     value: float,
     unit_system: wntr.epanet.util.FlowUnits,
     param: HydParam,
-    round_decimals: int = 2,
+    round_decimals: int = 4,
 ) -> float:
     """Convert a scalar value from SI to EPANET units."""
     return round(float(from_si(unit_system, value, param)), round_decimals)
@@ -348,7 +348,7 @@ def _convert_dataframe_from_si(
     df: pd.DataFrame,
     unit_system: wntr.epanet.util.FlowUnits,
     param: HydParam,
-    round_decimals: int = 2,
+    round_decimals: int = 4,
 ) -> pd.DataFrame:
     """
     Convert an entire result DataFrame from SI to EPANET units.
@@ -360,7 +360,7 @@ def _convert_dataframe_from_si(
     return (df * factor).round(round_decimals)
 
 
-def _round_dataframe(df: pd.DataFrame, round_decimals: int = 2) -> pd.DataFrame:
+def _round_dataframe(df: pd.DataFrame, round_decimals: int = 4) -> pd.DataFrame:
     """Round all numeric values in a result DataFrame."""
     return df.round(round_decimals)
 
@@ -432,7 +432,7 @@ def _dataframe_metric_stats(
 def _prepare_node_data(
     results: wntr.sim.SimulationResults,
     inp_handler: EpanetInpHandler,
-    round_decimals: int = 2,
+    round_decimals: int = 4,
 ) -> _PreparedNodeData:
     """Prepare converted node DataFrames and static metadata for export."""
     unit_system = _get_unit_system(inp_handler)
@@ -474,7 +474,7 @@ def _prepare_node_data(
 def _prepare_arc_data(
     results: wntr.sim.SimulationResults,
     inp_handler: EpanetInpHandler,
-    round_decimals: int = 2,
+    round_decimals: int = 4,
 ) -> _PreparedArcData:
     """Prepare converted arc DataFrames and static metadata for export."""
     unit_system = _get_unit_system(inp_handler)
@@ -631,7 +631,7 @@ def _export_node_stats(
     dao: HePgDao,
     result_id: str,
     prepared: _PreparedNodeData,
-    round_decimals: int = 2,
+    round_decimals: int = 4,
     giswater_version: int = 4,
 ) -> None:
     """Calculate node statistics and load them through a staging table."""
@@ -755,7 +755,7 @@ def _export_arc_stats(
     dao: HePgDao,
     result_id: str,
     prepared: _PreparedArcData,
-    round_decimals: int = 2,
+    round_decimals: int = 4,
 ) -> None:
     """Calculate arc statistics and load them through a staging table."""
     if not dao.cursor:

@@ -102,16 +102,21 @@ class TestSwmmRptHandler:
         with pytest.raises(ModelNotLoadedError):
             handler.get_errors()
 
-    def test_export_not_implemented(self):
+    def test_export_database_without_load_raises(self):
+        handler = SwmmRptHandler()
+        with pytest.raises(ModelNotLoadedError):
+            handler.export_to_database(result_id="1")
+
+    def test_export_frost_not_implemented(self):
         handler = SwmmRptHandler()
         with pytest.raises(NotImplementedError):
-            handler.export_to_database()
+            handler.export_to_frost()
 
 
 class TestSwmmOutHandler:
     """Test SwmmOutHandler class."""
 
-    def test_export_database_not_implemented(self):
+    def test_export_database_without_load_raises(self):
         handler = SwmmOutHandler()
-        with pytest.raises(NotImplementedError):
-            handler.export_to_database()
+        with pytest.raises(ModelNotLoadedError):
+            handler.export_to_database(result_id="1")

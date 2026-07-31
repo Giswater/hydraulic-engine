@@ -6,128 +6,86 @@
 | Package | [![PyPI Latest Release](https://img.shields.io/pypi/v/hydraulic_engine.svg)](https://pypi.org/project/hydraulic_engine/) [![PyPI Downloads](https://img.shields.io/pypi/dm/hydraulic_engine.svg?label=PyPI%20downloads)](https://pypi.org/project/hydraulic_engine/) |
 | Meta | [![License - GNU GPL3](https://img.shields.io/pypi/l/hydraulic_engine.svg)](https://github.com/Giswater/hydraulic_engine/blob/main/LICENSE) |
 
-
-A Python package for managing hydraulic calculation actions: EPANET/SWMM simulations, RPT file imports, and more.
+Python toolkit to run **SWMM** and **EPANET** simulations, work with their input and result files, and export results to a Giswater PostgreSQL database or a FROST SensorThings endpoint.
 
 ## Features
 
-- **Run SWMM simulations**: Execute Storm Water Management Model simulations
-- **Run EPANET simulations**: Execute water distribution network simulations
-- **Parse INP files**: Read and modify SWMM/EPANET input files
-- **Parse RPT files**: Read and analyze simulation results
-- **Multiple database support**: PostgreSQL (psycopg3), SQLite, and GeoPackage
+- Run SWMM (pyswmm) and EPANET (WNTR) simulations, with optional progress callbacks
+- Read and write SWMM / EPANET INP models
+- Read SWMM RPT and OUT results, and EPANET BIN results
+- Export simulation results to PostgreSQL (Giswater) or FROST
+- Connect to PostgreSQL, SQLite, and GeoPackage
 
 ## Installation
-
-### From PyPI
 
 ```bash
 pip install hydraulic-engine
 ```
 
-### From source
+From source:
 
 ```bash
-git clone https://github.com/bgeo-gis/hydraulic-engine.git
+git clone https://github.com/Giswater/hydraulic-engine.git
 cd hydraulic-engine
 pip install -e .
 ```
 
-### Development installation
+For development:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-## Quick Start
+## Quick start
 
-### Running a SWMM Simulation
-
-```python
-from hydraulic_engine.swmm import SwmmRunner
-
-runner = SwmmRunner(
-    inp_path="drainage_model.inp",
-    rpt_path="results.rpt",
-    out_path="results.out",
-)
-result = runner.run()
-
-if result.status.value == "success":
-    print(f"Simulation completed in {result.duration_seconds:.2f}s")
-    print(f"RPT file: {result.rpt_path}")
-else:
-    print(f"Errors: {result.errors}")
-```
-
-### Running an EPANET Simulation
+### Run a simulation
 
 ```python
-from hydraulic_engine.epanet import EpanetRunner
+import hydraulic_engine as he
+from hydraulic_engine.utils.enums import RunStatus
 
-runner = EpanetRunner(
-    inp_path="water_network.inp",
-    rpt_path="results.rpt",
-    bin_path="results.bin",
-)
-result = runner.run()
+# SWMM
+swmm = he.swmm.SwmmRunner(inp_path="drainage.inp")
+swmm_result = swmm.run()
 
-if result.status.value == "success":
-    print(f"Simulation completed in {result.duration_seconds:.2f}s")
+# EPANET
+epanet = he.epanet.EpanetRunner(inp_path="network.inp")
+epanet_result = epanet.run()
+
+if swmm_result.status == RunStatus.SUCCESS:
+    print(f"SWMM finished in {swmm_result.duration_seconds:.2f}s")
 ```
 
-### Reading SWMM INP Files
+Pass `progress_callback=fn` to either runner to receive progress updates during the run.
+
+### Work with model files
 
 ```python
 from hydraulic_engine.swmm import SwmmInpHandler
+from hydraulic_engine.epanet import EpanetInpHandler
 
-handler = SwmmInpHandler()
-handler.load_file("model.inp")
+swmm_inp = SwmmInpHandler()
+swmm_inp.load_file("drainage.inp")
+print(swmm_inp.get_summary())
 
-summary = handler.get_summary()
-print(f"Junctions: {summary['counts']['junctions']}")
-print(f"Conduits: {summary['counts']['conduits']}")
-
-junctions = handler.get_junctions()
-conduits = handler.get_conduits()
-
-handler.write("modified_model.inp")
+epanet_inp = EpanetInpHandler()
+epanet_inp.load_file("network.inp")
+print(epanet_inp.get_summary())
 ```
 
-### Reading SWMM Results
+Result files use the matching handlers: `SwmmRptHandler`, `SwmmOutHandler`, and `EpanetBinHandler`.
 
-```python
-from hydraulic_engine.swmm import SwmmRptHandler
+### Export results
 
-handler = SwmmRptHandler()
-handler.load_file("results.rpt")
-
-node_depths = handler.get_node_depth_summary()
-link_flows = handler.get_link_flow_summary()
-```
-
-### Progress Tracking
-
-```python
-from hydraulic_engine.swmm import SwmmRunner
-
-def on_progress(progress: int, message: str):
-    print(f"[{progress}%] {message}")
-
-runner = SwmmRunner(inp_path="model.inp", progress_callback=on_progress)
-result = runner.run()
-```
-
-## Database Connection
-
-The package supports database connections for storing/retrieving model data.
-
-### PostgreSQL Connection
+After a successful run, push results to the database or to FROST:
 
 ```python
 import hydraulic_engine as he
 
-conn = he.create_pg_connection(
+runner = he.swmm.SwmmRunner(inp_path="drainage.inp")
+runner.run()
+
+dao = he.create_pg_connection(
     host="localhost",
     port=5432,
     dbname="hydraulic_db",
@@ -136,116 +94,50 @@ conn = he.create_pg_connection(
     schema="my_schema",
 )
 
-rows = conn.get_rows("SELECT * FROM nodes")
-
-he.close_connection()
+runner.export_result(
+    to=he.ExportDataSource.DATABASE,
+    result_id="my_result",  # must already exist in rpt_cat_result
+    client=dao,
+)
 ```
 
-### GeoPackage Connection
+The same `export_result(..., to=he.ExportDataSource.FROST)` path works for SensorThings via `he.create_frost_connection(...)`. EPANET uses the same pattern on `EpanetRunner`.
+
+Exported SWMM time series follow what the model’s `[REPORT]` section requests (nodes, links, subcatchments).
+
+### Database connections
 
 ```python
 import hydraulic_engine as he
 
-conn = he.create_gpkg_connection("project.gpkg")
-
-rows = conn.get_rows("SELECT * FROM conduits")
+pg = he.create_pg_connection(host="localhost", port=5432, dbname="db", user="u", password="p")
+gpkg = he.create_gpkg_connection("project.gpkg")
+sqlite = he.create_sqlite_connection("local.db")
 
 he.close_connection()
 ```
 
-## Package Structure
+## Package layout
 
-```
-hydraulic-engine/
-├── src/
-│   └── hydraulic_engine/
-│       ├── __init__.py
-│       ├── exceptions.py
-│       ├── config/
-│       │   └── config.py
-│       ├── epanet/
-│       │   ├── runner.py            # Run EPANET simulations
-│       │   ├── inp_handler.py       # Parse/write EPANET INP files
-│       │   ├── bin_handler.py       # Parse EPANET binary result files
-│       │   ├── file_handler.py
-│       │   └── models.py
-│       ├── swmm/
-│       │   ├── runner.py            # Run SWMM simulations
-│       │   ├── inp_handler.py       # Parse/write SWMM INP files
-│       │   ├── rpt_handler.py       # Parse SWMM RPT files
-│       │   ├── out_handler.py       # Parse SWMM OUT files
-│       │   ├── file_handler.py
-│       │   └── models.py
-│       └── utils/
-│           ├── tools_log.py
-│           ├── tools_db.py
-│           ├── tools_api.py
-│           ├── tools_os.py
-│           ├── tools_config.py
-│           └── tools_sensorthings.py
-├── tests/
-├── pyproject.toml
-└── README.md
-```
-
-## API Reference
-
-### SWMM Classes
-
-| Class | Description |
-|-------|-------------|
-| `SwmmRunner` | Run SWMM simulations |
-| `SwmmInpHandler` | Read/write SWMM INP files |
-| `SwmmRptHandler` | Parse SWMM RPT result files |
-| `SwmmOutHandler` | Parse SWMM OUT result files |
-
-### EPANET Classes
-
-| Class | Description |
-|-------|-------------|
-| `EpanetRunner` | Run EPANET simulations |
-| `EpanetInpHandler` | Read/write EPANET INP files |
-| `EpanetBinHandler` | Parse EPANET BIN result files |
-
-### Connection Functions
-
-| Function | Description |
-|----------|-------------|
-| `create_pg_connection(...)` | Create PostgreSQL connection |
-| `create_gpkg_connection(gpkg_path)` | Create GeoPackage connection |
-| `create_sqlite_connection(db_path)` | Create SQLite connection |
-| `get_connection()` | Get current default connection |
-| `close_connection()` | Close default connection |
-
-## Dependencies
-
-- Python >= 3.9
-- pyswmm >= 2.0.0 (SWMM simulation engine)
-- swmm-api >= 0.4.31 (INP/RPT file parsing)
-- wntr >= 1.2.0 (EPANET simulations)
-- psycopg[binary] >= 3.1.0
-- requests >= 2.28.0
-- pyproj >= 3.6.0
+| Module | Role |
+|--------|------|
+| `hydraulic_engine.swmm` | SWMM runner, INP / RPT / OUT handlers |
+| `hydraulic_engine.epanet` | EPANET runner, INP / BIN handlers |
+| `hydraulic_engine.utils` | DB / API / logging helpers, `ExportDataSource`, `RunStatus` |
+| `hydraulic_engine.config` | Package configuration |
 
 ## Development
 
-### Running tests
-
 ```bash
 pytest tests/
-```
-
-### Code formatting
-
-```bash
 black src/
 ruff check src/
 ```
 
 ## License
 
-GNU General Public License v3.0 or later - see [LICENSE](LICENSE).
+GNU General Public License v3.0 or later — see [LICENSE](LICENSE).
 
 ## Authors
 
-**BGEO** - [info@bgeo.es](mailto:info@bgeo.es)
+**BGEO** — [info@bgeo.es](mailto:info@bgeo.es)

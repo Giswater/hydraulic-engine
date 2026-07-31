@@ -8,18 +8,27 @@ or (at your option) any later version.
 import os
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Callable
+from typing import Any, List, Optional, Callable, Union
 from pyswmm import Simulation
 from datetime import datetime
 
 from ..utils.enums import RunStatus, ExportDataSource
+from .export_db import finalize_result
 from .rpt_handler import SwmmRptHandler
 from .out_handler import SwmmOutHandler
 from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
 from .inp_handler import SwmmInpHandler
 from ..utils import tools_log
 from ..utils.tools_api import HeFrostClient
-from ..exceptions import ValidationError, UnsupportedFileTypeError, SimulationCancelled
+from ..utils.tools_db import HePgDao, get_connection
+from ..exceptions import (
+    DatabaseError,
+    ExportError,
+    ModelNotLoadedError,
+    ValidationError,
+    UnsupportedFileTypeError,
+    SimulationCancelled,
+)
 
 
 @dataclass
@@ -338,14 +347,29 @@ class SwmmRunner:
             max_workers: int = 4,
             crs_from: int = 25831,
             crs_to: int = 4326,
-            client: Optional[HeFrostClient] = None,
+            round_decimals: int = 4,
+            client: Optional[Union[HePgDao, HeFrostClient]] = None,
         ) -> bool:
         """
         Export the result file to a specific datasource
+
+        :param to: Target datasource
+        :param result_id: The result identifier
+        :param batch_size: FROST only, number of operations per batch
+        :param max_workers: FROST only, number of concurrent batch requests
+        :param crs_from: FROST only, CRS of the input file
+        :param crs_to: FROST only, CRS of the output file
+        :param round_decimals: Number of decimal places to round the results
+        :param client: HePgDao for DATABASE, HeFrostClient for FROST
+        :return: True if export successful
         """
 
         if to == ExportDataSource.DATABASE:
-            return self.out.export_to_database()
+            return self._export_to_database(
+                result_id=result_id,
+                round_decimals=round_decimals,
+                dao=client,
+            )
         elif to == ExportDataSource.FROST:
             return self.out.export_to_frost(
                 inp_handler=self.inp,
@@ -358,3 +382,94 @@ class SwmmRunner:
             )
         else:
             raise UnsupportedFileTypeError(f"Unsupported export target: {to}")
+
+    def _export_to_database(
+            self,
+            result_id: str,
+            round_decimals: int = 4,
+            dao: Optional[HePgDao] = None,
+        ) -> bool:
+        """
+        Export the SWMM results to the Giswater database in a single transaction.
+
+        The RPT summaries are always exported. OUT time series follow only for
+        the elements requested by the INP ``[REPORT]`` section (NODES / LINKS /
+        SUBCATCHMENTS = ALL or an ID list). Both handlers share one transaction
+        and the result catalog is finalized once.
+
+        :param result_id: The result identifier
+        :param round_decimals: Number of decimal places to round the results
+        :param dao: Database access object (optional, uses global connection if not provided)
+        :return: True if export successful
+        """
+        if self.rpt is None or not self.rpt.is_loaded():
+            raise ModelNotLoadedError("No RPT file loaded, run the simulation first")
+
+        if self.inp is None or not self.inp.is_loaded():
+            raise ModelNotLoadedError(
+                "No INP file loaded, run the simulation first so [REPORT] can be read"
+            )
+
+        report_selection = self.inp.get_report_element_selection()
+        needs_out = report_selection.has_any()
+
+        if needs_out and (self.out is None or not self.out.is_loaded()):
+            raise ModelNotLoadedError(
+                "No OUT file loaded, run the simulation first "
+                "(required because [REPORT] requests node/link/subcatchment results)"
+            )
+
+        if dao is None:
+            dao = get_connection()
+
+        if dao is None or not dao.is_connected():
+            raise DatabaseError("No database connection available")
+
+        try:
+            self._report_progress(0, "Exporting results to database...")
+
+            self.rpt.export_to_database(
+                result_id=result_id,
+                round_decimals=round_decimals,
+                dao=dao,
+                commit=False,
+            )
+            self._report_progress(50, "Report summaries exported")
+
+            if not needs_out:
+                tools_log.log_info(
+                    "Skipping OUT time series export "
+                    "([REPORT] NODES/LINKS/SUBCATCHMENTS are NONE or absent)"
+                )
+            else:
+                self.out.export_to_database(
+                    result_id=result_id,
+                    round_decimals=round_decimals,
+                    dao=dao,
+                    commit=False,
+                    report_selection=report_selection,
+                )
+                self._report_progress(90, "Time series exported")
+
+            finalize_result(dao, result_id)
+            dao.commit()
+
+            self._report_progress(100, "Export to database completed")
+            tools_log.log_info(f"Export to database completed for result_id: {result_id}")
+            return True
+
+        except (DatabaseError, ExportError, ModelNotLoadedError):
+            self._rollback(dao)
+            raise
+        except Exception as e:
+            tools_log.log_error(f"Error exporting to database: {e}")
+            self._rollback(dao)
+            raise ExportError(f"Error exporting to database: {e}") from e
+
+    @staticmethod
+    def _rollback(dao: HePgDao) -> None:
+        """Roll back the export transaction, ignoring rollback failures."""
+        try:
+            dao.rollback()
+        except DatabaseError:
+            pass

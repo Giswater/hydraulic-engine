@@ -8,6 +8,9 @@ or (at your option) any later version.
 import os
 from typing import Any, Dict, List, Optional
 
+from swmm_api.input_file.section_labels import REPORT
+
+from .export_db import ReportElementSelection, parse_report_kind
 from .file_handler import SwmmFileHandler
 from .models import SwmmFeatureSettings, SwmmOptionsSettings, SwmmOtherSettings
 from ..utils import tools_log
@@ -394,6 +397,29 @@ class SwmmInpHandler(SwmmFileHandler):
     def get_dwf(self) -> Dict[str, Any]:
         """Get DWF (Dry Weather Flow) section."""
         return _get_section_dict(self, 'DWF')
+
+    def get_report_element_selection(self) -> ReportElementSelection:
+        """
+        Read which nodes, links and subcatchments the INP asks to report.
+
+        Driven by ``[REPORT] NODES / LINKS / SUBCATCHMENTS``. Values resolve to
+        ``ALL``, an ID set, or None (NONE / absent) so the OUT exporter can skip
+        or filter each time-series table independently.
+
+        :return: Normalized report element selection
+        """
+        inp = _require_inp_loaded(self)
+        report = getattr(inp, 'REPORT', None)
+        if report is None and REPORT in inp:
+            report = inp[REPORT]
+        if report is None or not hasattr(report, 'get'):
+            return ReportElementSelection()
+
+        return ReportElementSelection(
+            nodes=parse_report_kind(report.get('NODES')),
+            links=parse_report_kind(report.get('LINKS')),
+            subcatchments=parse_report_kind(report.get('SUBCATCHMENTS')),
+        )
 
     # =========================================================================
     # Summary and Statistics

@@ -445,7 +445,7 @@ class EpanetRunner:
             crs_from: int = 25831,
             crs_to: int = 4326,
             start_time: Optional[datetime] = None,
-            round_decimals: int = 2,
+            round_decimals: int = 4,
             client: Optional[HeFrostClient] = None,
             giswater_version: int = 4,
             only_extrema: bool = False
